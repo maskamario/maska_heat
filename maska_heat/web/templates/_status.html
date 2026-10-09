@@ -1,0 +1,51 @@
+<section class="strip">
+  <div class="stat">
+    <div class="label">Electricity now</div>
+    {% if price_now %}
+      <div class="value">{{ price_now.cost_total | cents }}<small> c/kWh</small></div>
+      <div class="sub">spot {{ "%.1f" | format(price_now.eur_mwh / 10) }} c · {{ "day" if price_now.is_day else "night" }} tariff</div>
+    {% else %}
+      <div class="value">—</div><div class="sub">no price data yet</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="label">Outdoor</div>
+    <div class="value">{% if outdoor %}{{ "%.1f" | format(outdoor.temp) }}<small> °C</small>{% else %}—{% endif %}</div>
+    <div class="sub">
+      {% if outdoor %}{{ outdoor.source }}{% endif %}
+      {% if weather %} · wind {{ "%.0f" | format(weather.wind) }} m/s · cloud {{ "%.0f" | format(weather.cloud) }} %{% endif %}
+    </div>
+  </div>
+</section>
+
+{% if not tariff_configured %}
+<p class="notice">Network tariff not configured — costs show spot price + VAT only. Set <code>tariff</code> in config.yaml.</p>
+{% endif %}
+
+<section class="zones">
+  {% for z in zones %}
+  <article class="zone {% if z.stale %}is-stale{% endif %}">
+    <header>
+      <h2>{{ z.name }}</h2>
+      {% if not z.device_enabled %}
+        <span class="badge">not set up</span>
+      {% elif z.device_online is sameas false %}
+        <span class="badge bad">offline</span>
+      {% elif z.power_on is sameas false %}
+        <span class="badge">off</span>
+      {% elif z.is_heating %}
+        <span class="badge hot">heating{% if z.power_w %} · {{ "%.0f" | format(z.power_w) }} W{% endif %}</span>
+      {% elif z.is_heating is sameas false %}
+        <span class="badge">idle</span>
+      {% endif %}
+    </header>
+    <div class="temp">{% if z.temp is not none %}{{ "%.1f" | format(z.temp) }}<small>°C</small>{% else %}—{% endif %}</div>
+    <dl>
+      <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
+      {% if z.humidity is not none %}<div><dt>Humidity</dt><dd>{{ "%.0f" | format(z.humidity) }} %</dd></div>{% endif %}
+      <div><dt>Source</dt><dd>{{ (z.temp_source or "—").split(":")[0] }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ z.updated_at | age }}</dd></div>
+    </dl>
+  </article>
+  {% endfor %}
+</section>

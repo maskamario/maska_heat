@@ -1,0 +1,11 @@
+<ul class="list">
+  {% for f in fires %}
+  <li>
+    <span>🔥 {{ stoves.get(f.stove, f.stove) }}</span>
+    <span class="muted">{{ f.lit_at | localtime("%a %d.%m %H:%M") }}</span>
+    <button class="link" hx-post="/fires/{{ f.id }}/delete" hx-target="#fires" hx-confirm="Remove this fire entry?">remove</button>
+  </li>
+  {% else %}
+  <li class="muted">No fires logged in the last 7 days.</li>
+  {% endfor %}
+</ul>

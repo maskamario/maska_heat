@@ -10,22 +10,69 @@ price:
   area: ee            # Elering price area
   slot_minutes: 60    # hourly meter; set to 15 after meter upgrade
 
+# All amounts €/kWh WITHOUT VAT. Take them from your electricity and network bills / Elektrilevi price list.
+# Until network rates are filled in, costs show spot price + VAT only.
+tariff:
+  vat: 0.24
+  seller_margin_eur_kwh: 0.0     # electricity seller's margin on top of spot
+  excise_eur_kwh: 0.0            # elektriaktsiis
+  renewable_fee_eur_kwh: 0.0     # taastuvenergia tasu
+  network:                       # Elektrilevi Võrk 4
+    day_eur_kwh: 0.0
+    night_eur_kwh: 0.0
+    day_weekdays: [0, 1, 2, 3, 4]   # Mon–Fri
+    day_start: "07:00"
+    day_end: "22:00"
+    holidays_are_night: true
+
 devices:
   matis_mill:
     type: mill_local
     host: 192.168.1.12        # reserved DHCP address
+    power_w: 1500
   madli_adax:
     type: adax_cloud
     room_name: null           # Adax app room name; null = first room on the account
     host: 192.168.1.11        # LAN address, unused while on cloud API
+    power_w: 600
   living_mitsubishi:
     type: melcloud
+    enabled: false            # enable once MELCloud login is in secrets.yaml
     device_name: null         # MELCloud device name; null = first air-to-air unit
 
 sensors:
   living:
     type: esphome
-    host: maska-living-sensor.local   # or a fixed IP
+    enabled: false            # enable once the sensor is flashed and on WiFi
+    host: maska-living-sensor.local
   outdoor:
     type: esphome
+    enabled: false
     host: maska-outdoor-sensor.local
+
+outdoor_sensor: outdoor       # used instead of the forecast when it has fresh data
+
+zones:
+  madli:
+    name: Madli's bedroom
+    device: madli_adax
+  matis:
+    name: Matis's bedroom
+    device: matis_mill
+  living:
+    name: Living area
+    device: living_mitsubishi
+    temp_sources: [sensor:living, device:living_mitsubishi]   # first fresh source wins
+
+notify:
+  enabled: true
+  ntfy_server: https://ntfy.sh
+  offline_alert_minutes: 30
+  quiet_start: "23:00"
+  quiet_end: "06:30"
+
+web:
+  host: 0.0.0.0
+  port: 8000
+
+database: data/maska_heat.db

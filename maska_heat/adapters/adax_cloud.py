@@ -56,7 +56,7 @@ class AdaxCloudAdapter:
                 )
                 r.raise_for_status()
             except httpx.HTTPError as e:
-                raise DeviceError(f"Adax auth failed: {e}") from e
+                raise DeviceError(f"Adax auth failed: {type(e).__name__} {e}".rstrip()) from e
             body = r.json()
             self._token = body["access_token"]
             self._token_expires = time.monotonic() + float(body.get("expires_in", 3600))
@@ -68,7 +68,7 @@ class AdaxCloudAdapter:
             r = await self._client.get(f"{API_URL}/rest/v1/content/?withEnergy=1", headers=await self._auth_header())
             r.raise_for_status()
         except httpx.HTTPError as e:
-            raise DeviceError(f"Adax content request failed: {e}") from e
+            raise DeviceError(f"Adax content request failed: {type(e).__name__} {e}".rstrip()) from e
         return r.json()
 
     def _pick_room(self, content: dict) -> dict:
@@ -108,7 +108,7 @@ class AdaxCloudAdapter:
             r = await self._client.post(f"{API_URL}/rest/v1/control/", json=payload, headers=await self._auth_header())
             r.raise_for_status()
         except httpx.HTTPError as e:
-            raise DeviceError(f"Adax set temperature failed: {e}") from e
+            raise DeviceError(f"Adax set temperature failed: {type(e).__name__} {e}".rstrip()) from e
 
     async def aclose(self) -> None:
         await self._client.aclose()

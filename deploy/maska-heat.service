@@ -1,0 +1,18 @@
+[Unit]
+Description=maska_heat heating controller
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=/home/__USER__/maska_heat
+ExecStart=/home/__USER__/maska_heat/.venv/bin/python -m maska_heat
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+# Give the app time to close connections cleanly on stop
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

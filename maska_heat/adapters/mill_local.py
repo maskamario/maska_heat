@@ -35,7 +35,7 @@ class MillLocalAdapter:
             r = await self._client.get(self.base_url + path)
             r.raise_for_status()
         except httpx.HTTPError as e:
-            raise DeviceError(f"Mill {self.base_url}{path}: {e}") from e
+            raise DeviceError(f"Mill {self.base_url}{path}: {type(e).__name__} {e}".rstrip()) from e
         data = r.json()
         if data.get("status") != "ok":
             raise DeviceError(f"Mill {path} returned status {data.get('status')!r}")
@@ -46,7 +46,7 @@ class MillLocalAdapter:
             r = await self._client.post(self.base_url + path, json=payload)
             r.raise_for_status()
         except httpx.HTTPError as e:
-            raise DeviceError(f"Mill {self.base_url}{path}: {e}") from e
+            raise DeviceError(f"Mill {self.base_url}{path}: {type(e).__name__} {e}".rstrip()) from e
 
     async def info(self) -> dict:
         return await self._get("/status")
