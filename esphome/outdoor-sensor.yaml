@@ -1,0 +1,45 @@
+# Outdoor temperature sensor.
+# Hardware: M5Stack Atom Lite (ESP32) indoors or in a box under the eaves + waterproof DS18B20 probe
+# routed outside (north wall, shaded). DS18B20 data line needs a 4.7 kΩ pull-up to 3.3 V
+# (many probe kits include a small adapter board with it).
+# Secrets in esphome/secrets.yaml: wifi_ssid, wifi_password, outdoor_api_key, ota_password.
+
+esphome:
+  name: maska-outdoor-sensor
+  friendly_name: Outdoor sensor
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret outdoor_api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap: {}
+
+captive_portal:
+
+one_wire:
+  - platform: gpio
+    pin: GPIO26     # Grove port yellow wire
+
+sensor:
+  - platform: dallas_temp
+    name: Temperature
+    accuracy_decimals: 2
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 120s

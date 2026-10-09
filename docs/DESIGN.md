@@ -81,11 +81,17 @@ Adapters **never switch a device's power on or off** — only setpoints. Power s
 ### 3.2 Adax Clea H 06 WiFi — cloud
 - `https://api-1.adax.no/client-api`, OAuth2 with account ID + API secret from the Adax app (Account → Remote API).
 - Controls an **Adax "room"** → map zone → Adax room ID. Poll every 5–10 min, write only on change, cache token.
-- Phase 0: check if this model also offers Adax local API; prefer it if so.
+- Setpoint changes reach the heater on its next cloud sync (~5 min); temperature readings have the same
+  5-min resolution. Executor keeps a "pending" state per write and verifies after ≥ 6 min.
+- Phase 0 finding: the heater runs a local HTTP server, but local control needs a Bluetooth-provisioned token
+  (which detaches it from the Adax app) → cloud API.
 
 ### 3.3 Mill OIL1500WIFI3 — local
 - LAN HTTP API (`/control-status`, `/set-temperature`), static DHCP lease on router. Poll every 1–2 min.
 - Oil radiator = slow emitter: modelled with heat-release lag (§7).
+- Setpoints only work in operation mode **"Control individually"**; the app switches to it when it takes over
+  and back to **"Weekly program"** on graceful shutdown, so the Mill app schedule is the fallback.
+- No energy counter locally; energy estimated from `current_power` samples.
 
 ### 3.4 Mitsubishi MSZ-LN35VG2W — MELCloud (classic)
 
@@ -402,7 +408,7 @@ comfort penalty + hard penalties. Per zone, < 1 s on the Pi 3. Zones independent
 - Never power devices on/off. Device found off → skip zone, notify once.
 - Fallbacks: no prices → schedule `preferred`; low-confidence model → conservative; device offline → device
   keeps last setpoint (always ≥ some mode min) + notify; measured < min − 0.5 → force `preferred`.
-- Graceful shutdown → every zone to schedule `preferred`.
+- Graceful shutdown → every zone to schedule `preferred`; Mill back to "Weekly program".
 - Absolute limits: air 10–26 °C (and device range); floor per material limit.
 - **Season**: Heating (active) / Off (log only). Suggests switching from the 7-day forecast.
 

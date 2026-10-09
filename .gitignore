@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+build/
+dist/
+
+# Local configuration and credentials — never commit
+config.yaml
+secrets.yaml
+esphome/secrets.yaml
+esphome/.esphome/
+
+# Runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log

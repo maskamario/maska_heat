@@ -1,0 +1,31 @@
+# Copy to config.yaml and adjust. config.yaml is git-ignored.
+# Credentials do NOT go here — they go in secrets.yaml (see secrets.example.yaml).
+
+location:
+  latitude: 59.33     # Luige, Kiili vald
+  longitude: 24.74
+  timezone: Europe/Tallinn
+
+price:
+  area: ee            # Elering price area
+  slot_minutes: 60    # hourly meter; set to 15 after meter upgrade
+
+devices:
+  matis_mill:
+    type: mill_local
+    host: 192.168.1.12        # reserved DHCP address
+  madli_adax:
+    type: adax_cloud
+    room_name: null           # Adax app room name; null = first room on the account
+    host: 192.168.1.11        # LAN address, unused while on cloud API
+  living_mitsubishi:
+    type: melcloud
+    device_name: null         # MELCloud device name; null = first air-to-air unit
+
+sensors:
+  living:
+    type: esphome
+    host: maska-living-sensor.local   # or a fixed IP
+  outdoor:
+    type: esphome
+    host: maska-outdoor-sensor.local
