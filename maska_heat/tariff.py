@@ -46,7 +46,7 @@ def is_day_tariff(local: datetime, net: NetworkTariff) -> bool:
 class Cost:
     spot: float       # €/kWh, excl. VAT
     network: float
-    other: float      # margin + excise + renewable fee
+    other: float      # margin + balancing + excise + renewable + security of supply
     vat: float
     is_day: bool
 
@@ -60,5 +60,11 @@ def elec_cost(eur_mwh: float, local: datetime, t: TariffSettings) -> Cost:
     day = is_day_tariff(local, t.network)
     spot = eur_mwh / 1000.0
     network = t.network.day_eur_kwh if day else t.network.night_eur_kwh
-    other = t.seller_margin_eur_kwh + t.excise_eur_kwh + t.renewable_fee_eur_kwh
+    other = (
+        t.seller_margin_eur_kwh
+        + t.balancing_capacity_eur_kwh
+        + t.excise_eur_kwh
+        + t.renewable_fee_eur_kwh
+        + t.security_of_supply_fee_eur_kwh
+    )
     return Cost(spot, network, other, (spot + network + other) * t.vat, day)

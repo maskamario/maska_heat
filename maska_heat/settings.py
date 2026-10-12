@@ -42,6 +42,8 @@ class TariffSettings(BaseModel):
     seller_margin_eur_kwh: float = 0.0
     excise_eur_kwh: float = 0.0
     renewable_fee_eur_kwh: float = 0.0
+    security_of_supply_fee_eur_kwh: float = 0.0
+    balancing_capacity_eur_kwh: float = 0.0
     network: NetworkTariff = NetworkTariff()
 
     @property

@@ -10,16 +10,19 @@ price:
   area: ee            # Elering price area
   slot_minutes: 60    # hourly meter; set to 15 after meter upgrade
 
-# All amounts €/kWh WITHOUT VAT. Take them from your electricity and network bills / Elektrilevi price list.
+# All amounts €/kWh WITHOUT VAT, from the Alexela + Elektrilevi invoice of September 2026.
+# Monthly fixed fees (25 A connection, seller monthly fee) are left out — they do not depend on when you heat.
 # Until network rates are filled in, costs show spot price + VAT only.
 tariff:
   vat: 0.24
-  seller_margin_eur_kwh: 0.0     # electricity seller's margin on top of spot
-  excise_eur_kwh: 0.0            # elektriaktsiis
-  renewable_fee_eur_kwh: 0.0     # taastuvenergia tasu
-  network:                       # Elektrilevi Võrk 4
-    day_eur_kwh: 0.0
-    night_eur_kwh: 0.0
+  seller_margin_eur_kwh: 0.0             # seller's margin on top of spot (see contract)
+  balancing_capacity_eur_kwh: 0.00373    # tarbimise tasakaalustamisvõimsuse kulu (Alexela)
+  excise_eur_kwh: 0.0021                 # elektriaktsiis
+  renewable_fee_eur_kwh: 0.0084          # taastuvenergia tasu
+  security_of_supply_fee_eur_kwh: 0.00758  # varustuskindluse tasu
+  network:                               # Elektrilevi Võrk 4
+    day_eur_kwh: 0.0369
+    night_eur_kwh: 0.021
     day_weekdays: [0, 1, 2, 3, 4]   # Mon–Fri
     day_start: "07:00"
     day_end: "22:00"

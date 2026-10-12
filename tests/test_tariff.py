@@ -39,10 +39,18 @@ def test_day_tariff(local, expected):
 
 
 def test_cost_includes_all_components_and_vat():
-    t = TariffSettings(vat=0.24, seller_margin_eur_kwh=0.005, excise_eur_kwh=0.002, renewable_fee_eur_kwh=0.008, network=NET)
+    t = TariffSettings(
+        vat=0.24,
+        seller_margin_eur_kwh=0.005,
+        balancing_capacity_eur_kwh=0.001,
+        excise_eur_kwh=0.002,
+        renewable_fee_eur_kwh=0.008,
+        security_of_supply_fee_eur_kwh=0.003,
+        network=NET,
+    )
     c = elec_cost(100.0, datetime(2026, 10, 9, 12, tzinfo=TZ), t)  # 100 €/MWh, weekday day
     assert c.is_day and c.network == 0.06
-    assert c.total == pytest.approx((0.1 + 0.06 + 0.015) * 1.24)
+    assert c.total == pytest.approx((0.1 + 0.06 + 0.019) * 1.24)
 
 
 def test_negative_spot_price():
