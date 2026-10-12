@@ -72,7 +72,42 @@ Dashboard: **http://maska-heat.local:8000** (or `http://192.168.1.10:8000`) from
 3. Install the **ntfy** app on both phones → *Subscribe to topic* → same topic name.
 4. `sudo systemctl restart maska-heat`, then press *Send test notification* on the dashboard.
 
-## 6. Updating
+## 6. Phones
+
+### At home (WiFi)
+
+1. Find the Pi's address: on the Pi run `hostname -I` (first number), or use the address reserved in the router.
+2. On the phone, open Chrome → `http://<pi-address>:8000` (e.g. `http://192.168.1.10:8000`).
+   `http://maska-heat.local:8000` also works on many Android phones, but the IP address always does.
+3. Chrome menu ⋮ → **Add to Home screen**. The app gets the Maska Heat icon.
+
+### Away from home — Tailscale (recommended)
+
+Tailscale makes a private network between your own devices. Nothing is opened on the router, and only devices
+logged into your Tailscale account can reach the Pi. **Never port-forward 8000 on the router** — the UI has no
+login and can switch heaters.
+
+On the Pi:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up            # prints a login link — open it and sign in
+```
+
+On each phone: install **Tailscale** from Google Play, sign in with the same account, switch it on.
+The UI is then at `http://maska-heat:8000` from anywhere (at home too).
+
+Optional — HTTPS address, which lets Chrome install it as a full-screen app:
+
+```bash
+sudo tailscale serve --bg 8000
+tailscale serve status       # shows https://maska-heat.<your-tailnet>.ts.net
+```
+
+Open that `https://…ts.net` address on the phone → Chrome menu ⋮ → **Install app**.
+Your wife's phone can join the same account, or be invited to your tailnet from the Tailscale admin page.
+
+## 7. Updating
 
 ```bash
 cd ~/maska_heat
@@ -81,7 +116,7 @@ git pull
 sudo systemctl restart maska-heat
 ```
 
-## 7. Backup
+## 8. Backup
 
 The database is `~/maska_heat/data/maska_heat.db`. Safe copy while running:
 

@@ -171,3 +171,14 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 .grid.school input[type="time"] { width: 7.5em; }
 .card form + h3 { margin-top: 22px; }
 #school { overflow-x: auto; }
+
+/* phones */
+.card { min-width: 0; }
+#comfort .grid { width: 100%; }
+#comfort .grid input[type="number"] { width: 100%; min-width: 3.6em; max-width: 6em; }
+#comfort .grid th, #comfort .grid td { padding: 6px 4px; }
+@media (max-width: 480px) {
+  .top { padding: 10px 12px; }
+  nav a { margin-left: 10px; font-size: 14px; }
+  .form-row > label { flex: 1 1 100%; }
+}
