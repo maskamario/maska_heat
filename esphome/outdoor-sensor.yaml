@@ -1,7 +1,9 @@
 # Outdoor temperature sensor.
-# Hardware: M5Stack Atom Lite (ESP32) indoors or in a box under the eaves + waterproof DS18B20 probe
-# routed outside (north wall, shaded). DS18B20 data line needs a 4.7 kΩ pull-up to 3.3 V
-# (many probe kits include a small adapter board with it).
+# Hardware: M5Stack Atom Lite (ESP32) + waterproof DS18B20 probe + DS18B20 adapter module (has the 4.7 kΩ pull-up
+# resistor and a screw terminal). Wire the module to the Atom Lite's labelled header pins with female-female jumpers:
+#   module VCC → 3V3     module GND → GND     module DAT → G25
+# Use 3V3, not the Grove port's 5 V: the pull-up must go to 3.3 V to protect the ESP32 input.
+# The Atom stays indoors (by a window, on USB power); only the probe cable goes outside to a shaded north wall.
 # Secrets in esphome/secrets.yaml: wifi_ssid, wifi_password, outdoor_api_key, ota_password.
 
 esphome:
@@ -32,7 +34,7 @@ captive_portal:
 
 one_wire:
   - platform: gpio
-    pin: GPIO26     # Grove port yellow wire
+    pin: GPIO25     # header pin G25
 
 sensor:
   - platform: dallas_temp

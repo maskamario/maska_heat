@@ -4,7 +4,9 @@ Raspberry Pi app that controls the house's electric heating (radiators, air-to-a
 floor heating) based on electricity spot price, weather forecast and learned per-zone thermal behaviour.
 It also advises when heating with wood is cheaper, sends phone notifications, and has a local web UI.
 
-Status: **design — no code yet**. Remaining open questions in §15.
+Status (2026-10-12): phases 0 and 1 done and running on the Pi; per-room control modes (Hands-off / Manual /
+Smart schedule) implemented ahead of phase 3 (§5.6a). Next: IKEA room sensors (§3.6), then phase 2.
+See README.md → "Status & next steps".
 
 ---
 
@@ -29,7 +31,7 @@ Status: **design — no code yet**. Remaining open questions in §15.
 |---|---|---|
 | **Madli's bedroom** | ADAX Clea H 06 WiFi, panel heater, 600 W | — |
 | **Matis's bedroom** | Mill OIL1500WIFI3 (Gen 3), oil radiator, 1500 W | — |
-| **Living area** (living room + kitchen) | Mitsubishi MSZ-LN35VG2W / MUZ-LN35VGHZ2 heat pump (Hyper Heating) + **independent WiFi temperature sensor** (§3.6) | Masonry heater, wood cookstove with thermal mass wall |
+| **Living area** (living room + kitchen) | Mitsubishi MSZ-LN35VG2W / MUZ-LN35VGHZ2 heat pump (Hyper Heating) + **IKEA TIMMERFLOTTE room sensor** (planned, §3.6) | Masonry heater, wood cookstove with thermal mass wall |
 | **Hall** (between kids' rooms) | none — passive | Gets heat from neighbouring zones. Optional sensor later |
 | **Bathroom(s)** | Floor heating + thermostat — **deferred**, design hook only (§3.5) | — |
 
@@ -46,7 +48,7 @@ Weather location: Luige, Kiili vald, Harjumaa (≈ 59.33 N, 24.74 E, exact value
 | Runtime | Python 3.11+, FastAPI + Uvicorn, APScheduler, SQLite (WAL), `systemd` service in a venv. No Docker |
 | UI | Server-rendered HTML + HTMX + Chart.js (static files). No Node build on the Pi |
 | Notifications | **ntfy** — see §9 |
-| Remote access | Later: Tailscale (also lets notification action buttons reach the Pi from outside home) |
+| Remote access | **Tailscale** (set up): UI at `http://maska-heat:8000` from the phones, no router port opened |
 | Optional later | Mosquitto + Zigbee2MQTT if Zigbee floor thermostats are added |
 
 **Standalone app, not Home Assistant**: HA struggles on a Pi 3 B+ and the learning/planning would be custom anyway.
@@ -125,14 +127,28 @@ future room sensors) or Tuya WiFi via local protocol.
 
 ---
 
-### 3.6 Independent temperature sensors (WiFi)
+### 3.6 Independent temperature sensors
 
 Why: the living area must have a reliable temperature even if the Mitsubishi integration fails (otherwise there is
 no data to learn the masonry heater / cookstove effect), and the heat pump's own sensor sits near the ceiling in the
 unit's airflow and is biased. Independent sensors also make every zone model better.
 Bluetooth was ruled out (range through the house's walls).
 
-**Decision: ESP32 + SHT4x sensor running ESPHome, USB-powered (~15–25 € per sensor).** Shelly and Zigbee below are kept as documented alternatives.
+**Decision (2026-10-12): IKEA DIRIGERA hub + TIMMERFLOTTE sensors** — battery-powered (2 × AAA), wall-mounted,
+with a display, ~10 € per sensor + ~50 € hub once. Chosen for battery power and low cost per extra room
+(living area first; later kids' rooms, hall, bathroom humidity).
+
+- TIMMERFLOTTE is Matter-over-Thread; the DIRIGERA is the Thread border router. The Pi reads the sensors from the
+  DIRIGERA's **local, unofficial API** with the `dirigera` Python library (token created once by pressing the
+  hub's action button), polling every ~60 s. No cloud, nothing extra on the Pi.
+- Risks: the API is reverse-engineered and may change with hub firmware; the library is confirmed with
+  VINDSTYRKA, TIMMERFLOTTE still to be verified → buy one sensor first and verify before buying more.
+- To build: `DirigeraSensorAdapter` (sensor type `dirigera` in config: hub host + device name/ID, token in
+  secrets.yaml) feeding the same `sensor:<name>` readings as below. Not implemented yet.
+- Outdoor stays on the Open-Meteo forecast; optional ESPHome outdoor probe below.
+
+**Implemented and kept as option: ESP32 + sensor running ESPHome, USB-powered (~15–25 €).** Used for the optional
+outdoor probe. Shelly and Zigbee below are documented alternatives.
 - No-solder option: M5Stack Atom Lite/AtomS3 Lite + ENV IV unit (SHT40 + pressure) on a Grove cable.
   DIY option: any ESP32 dev board + SHT40/SHT45 breakout.
 - Flashed once from the browser (web.esphome.io). Reports every 30–60 s over WiFi; our app reads it with
@@ -457,12 +473,12 @@ comfort penalty + hard penalties. Per zone, < 1 s on the Pi 3. Zones independent
 
 | Phase | Deliverable |
 |---|---|
-| **0. Discovery** | Read & set Adax (cloud; check local), Mill (local), Mitsubishi (MELCloud). Confirm setpoint ranges and what each reports (power/energy). Buy + flash WiFi sensors (living area, outdoor), read them from the Pi. |
-| **1. Observe** | Config, DB, adapters, logger, prices, weather, tariffs, read-only dashboard + history, fire buttons, ntfy test. Run 1–2 weeks on the Pi. |
-| **2. Learn** | Thermal models incl. lag and fire effect; zone insights. |
-| **3. Control (MVP)** | Modes, schedules (house, kids, away), tiers, heuristic planner, executor, overrides, safety, notifications. |
+| **0. Discovery** ✅ | Read & set Adax (cloud), Mill (local), Mitsubishi (MELCloud). Setpoint ranges and reported values confirmed. Room sensors moved to IKEA (§3.6), pending. |
+| **1. Observe** ✅ | Config, DB, adapters, logger, prices, weather, tariffs, dashboard + history, fire buttons, ntfy, Pi service, phone access via Tailscale. Collecting data since 2026-10-12. |
+| **2. Learn** ⏳ | Thermal models incl. lag and fire effect; zone insights. Start after 1–2 weeks of data, ideally with the living-area sensor. |
+| **3. Control (MVP)** ◐ | Done early: control modes, schedules (house, kids, away, home today), comfort settings UI, executor + safety (§5.6a). To do: price tiers, price-aware heuristic planner, flex mode. |
 | **4. Optimise** | Wood advisor, flex mode, DP planner, savings, COP refinement from energy data. |
-| **5. Extend** | Bathroom floor zones, room/hall sensors, ICS calendar, ESP32 for Mitsubishi if needed, 15-min slots, Tailscale. |
+| **5. Extend** | Bathroom floor zones, more room/hall sensors, ICS calendar, ESP32 for Mitsubishi if needed, 15-min slots. |
 
 ---
 

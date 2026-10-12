@@ -24,9 +24,9 @@ python -m maska_heat.probe --help
 | 6 | Adax — cloud read | ✅ | One room ("Living Room" in the Adax app = Madli's bedroom), one heater |
 | 6b | Adax — cloud set | ✅ | Works, but takes effect only on the heater's next cloud sync (~5 min) |
 | 7 | Mitsubishi — MELCloud read | ✅ | Classic MELCloud works. Unit "Elutuba", heat mode, setpoint range 10–31 °C step 0.5, cumulative energy counter |
-| 8 | ESPHome living sensor | ⏳ | Buy M5Stack Atom Lite + ENV IV, flash `esphome/living-sensor.yaml` |
-| 9 | ESPHome outdoor sensor | ⏳ | Atom Lite + DS18B20 probe, `esphome/outdoor-sensor.yaml` |
-| 10 | Heater wattages & setpoint ranges confirmed | ⏳ | Mill 1500 W, Adax 600 W; Mitsubishi range read from MELCloud |
+| 8 | Living-area sensor | ⏳ | Changed to IKEA DIRIGERA + TIMMERFLOTTE (battery). Available in Estonia ~1 week after 2026-10-12. Verify the sensor shows up in the DIRIGERA local API, then build `DirigeraSensorAdapter` |
+| 9 | Outdoor sensor | optional | Forecast used for now. Option: Atom Lite + DS18B20 on 3V3/GND/G25, `esphome/outdoor-sensor.yaml` |
+| 10 | Heater wattages & setpoint ranges confirmed | ✅ | Mill 1500 W, Adax 600 W, Mitsubishi 10–31 °C step 0.5 |
 
 ## Findings
 

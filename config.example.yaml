@@ -43,6 +43,8 @@ devices:
     enabled: false            # enable once MELCloud login is in secrets.yaml
     device_name: null         # MELCloud device name; null = first air-to-air unit
 
+# Room sensors. Planned: IKEA TIMMERFLOTTE via the DIRIGERA hub (type `dirigera`, not implemented yet).
+# ESPHome devices work today (see esphome/).
 sensors:
   living:
     type: esphome
