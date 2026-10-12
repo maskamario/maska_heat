@@ -23,7 +23,7 @@ python -m maska_heat.probe --help
 | 5 | Adax — local API | ❌ | Heater at 192.168.1.193 (→ .11) runs a local HTTP server, but it requires a token set via Bluetooth provisioning. Staying on cloud |
 | 6 | Adax — cloud read | ✅ | One room ("Living Room" in the Adax app = Madli's bedroom), one heater |
 | 6b | Adax — cloud set | ✅ | Works, but takes effect only on the heater's next cloud sync (~5 min) |
-| 7 | Mitsubishi — MELCloud | ⏳ | Needs MELCloud login (reset password at app.melcloud.com). Check whether the account was migrated to MELCloud Home |
+| 7 | Mitsubishi — MELCloud read | ✅ | Classic MELCloud works. Unit "Elutuba", heat mode, setpoint range 10–31 °C step 0.5, cumulative energy counter |
 | 8 | ESPHome living sensor | ⏳ | Buy M5Stack Atom Lite + ENV IV, flash `esphome/living-sensor.yaml` |
 | 9 | ESPHome outdoor sensor | ⏳ | Atom Lite + DS18B20 probe, `esphome/outdoor-sensor.yaml` |
 | 10 | Heater wattages & setpoint ranges confirmed | ⏳ | Mill 1500 W, Adax 600 W; Mitsubishi range read from MELCloud |
@@ -57,6 +57,14 @@ python -m maska_heat.probe --help
 - `energyWh` stayed 0 for 10 min although the heater **was heating** (confirmed on site) → energy is reported with
   a delay or aggregated over longer periods. Re-check over a day before relying on it; until then estimate energy
   from the model (600 W × heating time).
+
+### Mitsubishi / MELCloud (2026-10-12)
+- Classic MELCloud login works through `pymelcloud`; one air-to-air unit named **"Elutuba"**.
+- Heating setpoint range reported as **10–31 °C** (step 0.5) — so the living area *can* follow Away (14 °C);
+  the 16 °C limit assumed in the design does not apply to this unit/API.
+- `total_energy_consumed` is a cumulative kWh counter (4724.4 kWh at first read) → hourly energy = counter delta,
+  which lets phase 2 learn the real COP against outdoor temperature.
+- No live power or compressor state; `last_seen` shows when the unit last reported to the cloud.
 
 ### Prices
 - Elering returns `data.ee[]` with `timestamp` (unix, UTC) and `price` (€/MWh) every 15 minutes.

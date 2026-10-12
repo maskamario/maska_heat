@@ -106,8 +106,8 @@ The unit is registered in **classic MELCloud**, which has a well-known (unoffici
 
 **Heat pump specifics**
 - Modulating, not on/off. Small setpoint shifts only (±2 °C from preferred, ≤ 1 change per hour).
-- **Setpoint range in heating is limited (≈ 16–31 °C; 10 °C only via "i-save" if the API exposes it)** — so the
-  living area cannot follow Away 14 °C; it bottoms out at the device minimum.
+- Setpoint range via MELCloud: **10–31 °C**, step 0.5 (confirmed in phase 0) — the living area can follow Away.
+- MELCloud reports a cumulative energy counter → hourly kWh for COP learning.
 - Default COP curve (refined from MELCloud energy data later):
 
   | Outdoor °C | +10 | +7 | +2 | −7 | −15 | −20 | −25 |
@@ -221,7 +221,7 @@ The heat pump is naturally favoured and prefers warmer hours (better COP).
 | **Away** | 14 | 15 | 18 | House empty for days (weekend trip, vacation) |
 
 - `min` hard floor, `preferred` normal target, `max` ceiling for storing heat.
-- Values are global defaults, overridable per zone. Device limits apply (living area ≥ 16 °C).
+- Values are global defaults, overridable per zone. Device setpoint limits always apply.
 
 ### 5.2 Schedules
 
@@ -268,7 +268,7 @@ model and picks the cheapest-heat hours. Day → Night needs no pre-heat (coast 
 
 | Zone | Flex allowed |
 |---|---|
-| Living area | Day min 20 → 18.5, Night 18 → 17 (device min 16 still applies) |
+| Living area | Day min 20 → 18.5, Night 18 → 17 |
 | Madli's / Matis's bedrooms | **No flex** — bands stay fixed |
 | Bathroom floors | No flex below mold-prevention minimum |
 
