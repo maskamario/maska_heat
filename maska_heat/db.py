@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS events (
     message  TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
+
+-- UI-editable settings and per-zone control state, as JSON documents
+CREATE TABLE IF NOT EXISTS kv (
+    key         TEXT PRIMARY KEY,
+    value       TEXT    NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS notifications (
     id       INTEGER PRIMARY KEY,
@@ -186,6 +193,19 @@ class Database:
     def fires(self, since: int, until: int | None = None) -> list[sqlite3.Row]:
         return self._all(
             "SELECT * FROM fires WHERE lit_at>=? AND lit_at<? ORDER BY lit_at DESC", (since, until or 2**62)
+        )
+
+    # key/value documents ------------------------------------------------------
+
+    def get_kv(self, key: str) -> str | None:
+        rows = self._all("SELECT value FROM kv WHERE key=?", (key,))
+        return rows[0]["value"] if rows else None
+
+    def set_kv(self, key: str, value: str) -> None:
+        self._exec(
+            "INSERT INTO kv (key, value, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value, int(time.time())),
         )
 
     # events & notifications ---------------------------------------------------

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Control · Maska Heat{% endblock %}
+{% block content %}
+{% if error %}<p class="notice bad-bg">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <header class="card-head">
+    <h2>Control</h2>
+    <span class="muted">Hands-off = heater's own app · Manual = fixed temperature · Smart = follows your schedule</span>
+  </header>
+  <div class="set-all">
+    <span class="muted">All rooms:</span>
+    {% for m in ["handsoff", "manual", "smart"] %}
+      <button type="button" hx-post="/control/all" hx-vals='{"mode": "{{ m }}"}'
+              {% if m != "handsoff" %}hx-confirm="Switch every room to {{ mode_name(m) }}?"{% endif %}>{{ mode_name(m) }}</button>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="zones">
+  {% for c in cards %}
+    {% with key=c.key, zone=c.zone, view=c.view, ctl=c.ctl, decision=c.decision, controllable=c.controllable %}
+      {% include "_control_zone.html" %}
+    {% endwith %}
+  {% endfor %}
+</section>
+
+<div class="two">
+  <section class="card">
+    <header class="card-head"><h2>Away</h2><span class="muted">Smart rooms drop to Away and are warm again on return</span></header>
+    {% if away.end and away.end > now_local %}
+      <p>
+        {% if away.start > now_local %}Planned: {% else %}<strong>Away now</strong> · {% endif %}
+        {{ away.start.strftime("%a %d.%m %H:%M") }} → {{ away.end.strftime("%a %d.%m %H:%M") }}
+      </p>
+      <form method="post" action="/away/cancel"><button type="submit">Cancel away</button></form>
+    {% else %}
+      <form method="post" action="/away" class="form-row">
+        <label>From (empty = now) <input type="datetime-local" name="start"></label>
+        <label>Until <input type="datetime-local" name="end" required></label>
+        <button type="submit">Set away</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <header class="card-head"><h2>Home today</h2><span class="muted">Kid stays home — no school "Out" period today</span></header>
+    {% if kids %}
+      <ul class="list">
+        {% for k in kids %}
+          <li>
+            <span>{{ zones[k].name }}</span>
+            <form method="post" action="/home-today/{{ k }}" class="push-right">
+              {% if k in home_today %}
+                <input type="hidden" name="on" value="0"><span class="badge hot">home today</span> <button type="submit" class="link">undo</button>
+              {% else %}
+                <input type="hidden" name="on" value="1"><button type="submit">Home today</button>
+              {% endif %}
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No rooms with a school timetable — enable them in <a href="/settings">Settings</a>.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

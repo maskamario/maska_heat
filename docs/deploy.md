@@ -94,5 +94,8 @@ sqlite3 ~/maska_heat/data/maska_heat.db ".backup '/home/mario/maska_heat-backup.
 - The Mill IP moves from `192.168.1.229` to the reserved `192.168.1.12` when its lease renews — update
   `devices.matis_mill.host` in `config.yaml` then and restart the service.
 - Enable `living_mitsubishi` and the ESPHome sensors in `config.yaml` once they are set up.
+- `school: true` on a zone pre-selects it for the school timetable on the Settings page (the UI checkbox wins once
+  saved). Every room starts in **Hands-off** after an update — nothing is controlled until you switch it on the
+  Control page.
 - The dashboard loads htmx and Chart.js from a CDN, so the viewing device needs internet; the Pi itself keeps
   logging without it (except prices and weather).

@@ -135,3 +135,39 @@ button.link { border: 0; background: none; padding: 0; color: var(--muted); text
 
 .toolbar { display: flex; gap: 16px; flex-wrap: wrap; }
 .toolbar label { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+
+/* control & settings */
+nav a { margin-left: 14px; }
+.notice.bad-bg { background: color-mix(in srgb, var(--bad) 15%, var(--surface)); }
+.notice.ok-bg { background: color-mix(in srgb, #16a34a 15%, var(--surface)); }
+.warn { color: var(--day); }
+.small { font-size: 13px; margin: 6px 0 0; }
+.set-all { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.seg { display: flex; margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { flex: 1; border: 0; border-radius: 0; padding: 8px 6px; background: var(--surface); color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+
+.ctl .target { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.stepper { display: flex; align-items: center; gap: 14px; }
+.stepper button { width: 44px; height: 44px; font-size: 22px; padding: 0; border-radius: 50%; }
+
+.form-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.form-row label, label.inline { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+label.inline { flex-direction: row; align-items: center; gap: 8px; margin: 10px 0; }
+input[type="number"], input[type="time"], input[type="date"], input[type="datetime-local"] {
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+}
+input[type="number"] { width: 5.5em; }
+.push-right { margin-left: auto; }
+h3 { font-size: 14px; margin: 18px 0 6px; }
+
+.grid { border-collapse: collapse; margin-bottom: 10px; }
+.grid th, .grid td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+.grid thead th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.grid.school td.times { display: flex; flex-direction: column; gap: 4px; }
+.grid.school input[type="time"] { width: 7.5em; }
+.card form + h3 { margin-top: 22px; }
+#school { overflow-x: auto; }

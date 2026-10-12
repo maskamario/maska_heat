@@ -59,9 +59,11 @@ zones:
   madli:
     name: Madli's bedroom
     device: madli_adax
+    school: true              # kids' room: school timetable applies (editable in UI)
   matis:
     name: Matis's bedroom
     device: matis_mill
+    school: true              # kids' room: school timetable applies (editable in UI)
   living:
     name: Living area
     device: living_mitsubishi

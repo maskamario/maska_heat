@@ -77,6 +77,8 @@ class ZoneSettings(BaseModel):
     device: str | None = None
     # Temperature sources in priority order: "sensor:<name>" or "device:<name>". Defaults to the device.
     temp_sources: list[str] = []
+    # Default for the UI: does this zone follow a school timetable (kids' rooms)?
+    school: bool = False
 
 
 class NotifySettings(BaseModel):

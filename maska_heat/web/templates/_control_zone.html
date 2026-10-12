@@ -1,0 +1,50 @@
+<article class="zone ctl" id="ctl-{{ key }}">
+  <header>
+    <h2>{{ zone.name }}</h2>
+    <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C now{% endif %}</span>
+  </header>
+
+  {% if not controllable %}
+    <p class="muted">Heater not set up — nothing to control.</p>
+  {% else %}
+    <div class="seg" role="group" aria-label="Control mode for {{ zone.name }}">
+      {% for m in ["handsoff", "manual", "smart"] %}
+        <button type="button"
+                hx-post="/control/{{ key }}/mode" hx-vals='{"mode": "{{ m }}"}'
+                hx-target="#ctl-{{ key }}" hx-swap="outerHTML"
+                class="{% if ctl.mode == m %}on{% endif %}"
+                aria-pressed="{{ 'true' if ctl.mode == m else 'false' }}">{{ mode_name(m) }}</button>
+      {% endfor %}
+    </div>
+
+    {% if ctl.mode == "manual" %}
+      <div class="stepper">
+        <button type="button" aria-label="Lower by 0.5 °C"
+                hx-post="/control/{{ key }}/setpoint" hx-vals='{"delta": -0.5}'
+                hx-target="#ctl-{{ key }}" hx-swap="outerHTML">−</button>
+        <span class="target">{{ "%.1f" | format(ctl.manual_setpoint) }}<small> °C</small></span>
+        <button type="button" aria-label="Raise by 0.5 °C"
+                hx-post="/control/{{ key }}/setpoint" hx-vals='{"delta": 0.5}'
+                hx-target="#ctl-{{ key }}" hx-swap="outerHTML">+</button>
+      </div>
+      <p class="muted small">Stays at this temperature until you change it or switch mode.</p>
+    {% elif ctl.mode == "smart" %}
+      <div class="target">{{ "%.1f" | format(decision.setpoint) }}<small> °C</small></div>
+      <p class="small">{{ decision.label }}</p>
+      {% if decision.smart and decision.smart.next_change %}
+        {% set at, nxt = decision.smart.next_change %}
+        <p class="muted small">Next: {{ comfort_label[nxt.mode] }} {{ "%.1f" | format(nxt.setpoint) }} °C at {{ at.strftime("%a %H:%M") }}</p>
+      {% endif %}
+    {% else %}
+      <p class="muted small">The heater follows its own app or remote. maska-heat only watches.</p>
+    {% endif %}
+
+    {% if ctl.mode != "handsoff" %}
+      {% if decision.blocked %}
+        <p class="warn small">Not sending: {{ decision.blocked }}</p>
+      {% elif view.setpoint is not none and decision.setpoint is not none and (view.setpoint - decision.setpoint) | abs > 0.05 %}
+        <p class="muted small">Heater is at {{ "%.1f" | format(view.setpoint) }} °C — update on its way (cloud heaters take up to ~5 min).</p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+</article>

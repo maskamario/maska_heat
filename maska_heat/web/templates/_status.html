@@ -18,6 +18,10 @@
   </div>
 </section>
 
+{% if away.end and away.start and away.start.timestamp() <= now_ts < away.end.timestamp() %}
+<p class="notice">Away until {{ away.end.strftime("%a %d.%m %H:%M") }} — <a href="/control">change</a></p>
+{% endif %}
+
 {% if not tariff_configured %}
 <p class="notice">Network tariff not configured — costs show spot price + VAT only. Set <code>tariff</code> in config.yaml.</p>
 {% endif %}
@@ -42,6 +46,8 @@
     <div class="temp">{% if z.temp is not none %}{{ "%.1f" | format(z.temp) }}<small>°C</small>{% else %}—{% endif %}</div>
     <dl>
       <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
+      {% set d = decisions[z.key] %}
+      <div><dt>Control</dt><dd><a href="/control">{{ mode_name(d.mode) }}</a>{% if d.mode == "smart" %} · {{ d.label }}{% endif %}</dd></div>
       {% if z.humidity is not none %}<div><dt>Humidity</dt><dd>{{ "%.0f" | format(z.humidity) }} %</dd></div>{% endif %}
       <div><dt>Source</dt><dd>{{ (z.temp_source or "—").split(":")[0] }}</dd></div>
       <div><dt>Updated</dt><dd>{{ z.updated_at | age }}</dd></div>

@@ -15,7 +15,9 @@
     <a href="/" class="brand">Maska Heat</a>
     <nav>
       <a href="/" {% if request.url.path == '/' %}aria-current="page"{% endif %}>Now</a>
+      <a href="/control" {% if request.url.path == '/control' %}aria-current="page"{% endif %}>Control</a>
       <a href="/history" {% if request.url.path == '/history' %}aria-current="page"{% endif %}>History</a>
+      <a href="/settings" {% if request.url.path == '/settings' %}aria-current="page"{% endif %}>Settings</a>
     </nav>
   </header>
   <main>

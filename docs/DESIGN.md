@@ -275,6 +275,15 @@ model and picks the cheapest-heat hours. Day → Night needs no pre-heat (coast 
 Max 6 h continuous; readiness targets still apply afterwards; notification + dashboard banner; "Flex off today"
 button. Usually a lit masonry heater makes flex unnecessary in the living area (§8).
 
+### 5.6a Control modes (implemented ahead of phase 3)
+
+Each zone has a mode set on the Control page: **Hands-off** (default, never writes), **Manual** (fixed setpoint) or
+**Smart** (schedule only: comfort mode `preferred` per §5.2–5.4, pre-heat with cautious default heating rates —
+resistive 1.0, heat pump 1.5, floor 0.5 °C/h — until phase 2 learns real ones; no price shifting yet).
+Comfort bands, house schedule, school timetable/holidays, away and "home today" are edited in the UI and stored in
+the database (`kv` table). On taking control the app remembers the device setpoint; returning to Hands-off restores
+it (Mill: back to weekly program). The Mill is also released to its weekly program on clean shutdown.
+
 ### 5.6 Ad-hoc controls (UI)
 Away from/until (house), Home today (kid), Boost (zone, N h), Hold (until cancelled), Flex off today, fire logged.
 Precedence: Hold > Boost > Away > Home-today > Flex > Plan > Schedule fallback. All expire and are visible.

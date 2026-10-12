@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Settings · Maska Heat{% endblock %}
+{% block content %}
+{% if error %}<p class="notice bad-bg">{{ error }}</p>{% endif %}
+{% if saved %}<p class="notice ok-bg">Saved ✓ — smart rooms pick up the change right away.</p>{% endif %}
+
+<section class="card" id="comfort">
+  <header class="card-head">
+    <h2>Comfort ranges</h2>
+    <span class="muted">°C · Smart mode currently uses <em>preferred</em>; min/max are for price-based shifting later</span>
+  </header>
+  <form method="post" action="/settings/comfort">
+    <table class="grid">
+      <thead><tr><th></th><th>Min</th><th>Preferred</th><th>Max</th></tr></thead>
+      <tbody>
+        {% for m in modes %}
+          {% set b = comfort.band(m) %}
+          <tr>
+            <th scope="row">{{ comfort_label[m] }}</th>
+            {% for f in ["min", "preferred", "max"] %}
+              <td><input type="number" name="{{ m }}_{{ f }}" value="{{ b[f] }}" step="0.5" min="5" max="30" required aria-label="{{ comfort_label[m] }} {{ f }}"></td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted small">Day = home and awake · Night = sleeping · Out = kid at school · Away = house empty.</p>
+    <button type="submit">Save comfort ranges</button>
+  </form>
+</section>
+
+<section class="card" id="house">
+  <header class="card-head"><h2>House schedule</h2><span class="muted">Rooms are pre-heated to be warm at these times</span></header>
+  <form method="post" action="/settings/house" class="form-row">
+    <label>Wake-up, weekdays <input type="time" name="weekday_wake" value="{{ house.weekday_wake | hhmm }}" required></label>
+    <label>Wake-up, weekends &amp; holidays <input type="time" name="weekend_wake" value="{{ house.weekend_wake | hhmm }}" required></label>
+    <label>Night starts <input type="time" name="night_start" value="{{ house.night_start | hhmm }}" required></label>
+    <button type="submit">Save schedule</button>
+  </form>
+</section>
+
+<section class="card" id="school">
+  <header class="card-head"><h2>School timetable</h2><span class="muted">Rooms are "Out" between leaving and returning, and warm again by the return time</span></header>
+  <form method="post" action="/settings/school">
+    <table class="grid school">
+      <thead>
+        <tr><th>Room</th><th>Uses timetable</th>{% for d in weekdays[:5] %}<th>{{ d }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for k, z in zones.items() %}
+          {% set kid = school.zones.get(k) %}
+          <tr>
+            <th scope="row">{{ z.name }}</th>
+            <td><input type="checkbox" name="{{ k }}_enabled" {% if kid and kid.enabled %}checked{% endif %} aria-label="{{ z.name }} uses school timetable"></td>
+            {% for d in range(5) %}
+              {% set day = kid.days.get(d) if kid else none %}
+              <td class="times">
+                <input type="time" name="{{ k }}_{{ d }}_leave" value="{{ day.leave | hhmm if day else '' }}" aria-label="{{ z.name }} {{ weekdays[d] }} leaves">
+                <input type="time" name="{{ k }}_{{ d }}_back" value="{{ day.back | hhmm if day else '' }}" aria-label="{{ z.name }} {{ weekdays[d] }} returns">
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted small">Top time = leaves, bottom = returns. Leave both empty for a day without school.</p>
+    <label class="inline">School-day morning in kids' rooms:
+      <select name="morning_target">
+        <option value="min" {% if school.morning_target == "min" %}selected{% endif %}>Day min (short morning before school)</option>
+        <option value="preferred" {% if school.morning_target == "preferred" %}selected{% endif %}>Day preferred</option>
+      </select>
+    </label>
+    <button type="submit">Save timetable</button>
+  </form>
+
+  <h3>School holidays</h3>
+  <ul class="list">
+    {% for h in school.holidays %}
+      <li>
+        <span>{{ h.start.strftime("%d.%m.%Y") }} – {{ h.end.strftime("%d.%m.%Y") }}</span>
+        <form method="post" action="/settings/holidays/delete" class="push-right">
+          <input type="hidden" name="index" value="{{ loop.index0 }}"><button type="submit" class="link">remove</button>
+        </form>
+      </li>
+    {% else %}
+      <li class="muted">No school holidays added. Public holidays and weekends are handled automatically.</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/settings/holidays" class="form-row">
+    <label>From <input type="date" name="start" required></label>
+    <label>Until <input type="date" name="end" required></label>
+    <button type="submit">Add holiday</button>
+  </form>
+</section>
+{% endblock %}
