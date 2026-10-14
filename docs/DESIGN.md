@@ -351,6 +351,16 @@ T[k+1] = T[k] + Δt · ( a·u_eff[k]  −  b·(T[k] − T_out[k])  +  c·solar[k
 - Built-in sensors are biased (Mitsubishi near ceiling, radiators near the heater); models learn in "device-sensor"
   units, consistent with what the thermostats regulate. Refit against external sensors if added.
 
+**Cold-weather learning** (to design in phase 2): data collection starts in stable mild weather, so the first
+cold snap runs on extrapolation. The physical form (loss ∝ T_in − T_out) extrapolates reasonably, but a narrow
+ΔT range identifies `b` poorly, heat pump capacity/COP drops in the cold, and a pure 14-day window forgets a cold
+week before the next one comes.
+- Fit window by **outdoor-temperature coverage**, not just age: keep a reserve of cold-weather samples (e.g. per
+  5 °C outdoor bin) older than 14 days, so a learned cold snap isn't dropped.
+- **Confidence per outdoor-temperature range**: when the forecast goes outside the range seen in the fit data,
+  plan conservatively (earlier pre-heat, less price shifting) until data from that range exists.
+- **Wind** from the weather forecast as an optional loss term (`b` grows with wind) — evaluate once data allows.
+
 **Learned fire value**: comparing heat pump energy (MELCloud energy data) on fire vs no-fire days at similar outdoor
 temperatures gives the **useful electric kWh a fire actually displaces** — this replaces the theoretical wood
 estimate in §8 once there's enough data.
