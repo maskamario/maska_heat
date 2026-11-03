@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,9 @@ SENSOR_STALE_SECONDS = 300
 PRICE_CHECK_SECONDS = 15 * 60
 WEATHER_SECONDS = 60 * 60
 HEALTH_SECONDS = 60
+ENERGY_SECONDS = 60 * 60
+ENERGY_DAYS = 31  # daily totals kept up to date; MELCloud answers per day up to 31 days
+ENERGY_HOURLY_DAYS = 13  # MELCloud keeps hourly data for about two weeks
 NEXT_DAY_PRICES_AFTER = (13, 30)  # local time; day-ahead results are published ~14:00
 
 
@@ -75,6 +78,7 @@ class Collector:
         self.sensors: dict[str, EsphomeSensor] = {}
         self.health: dict[str, SourceHealth] = {}
         self._tasks: list[asyncio.Task] = []
+        self._energy_done: set[tuple[str, date]] = set()  # past days whose energy report is stored
         now = time.time()
 
         for name, cfg in settings.devices.items():
@@ -103,9 +107,51 @@ class Collector:
             self._failed(source, e)
             return
         self.db.add_readings(
-            [Reading(int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, s.power_w, s.energy_kwh)]
+            [
+                Reading(
+                    int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, s.power_w, s.energy_kwh,
+                    mode=s.mode,
+                )
+            ]
         )
         self._ok(source)
+
+    async def update_energy(self) -> None:
+        """Energy from devices with an energy report (MELCloud): daily totals for the last month (MELCloud keeps
+        correcting recent days, so they are refetched each time) and the hourly profile for the days it still has.
+        """
+        today = datetime.now(self.tz).date()
+        for name, adapter in self.devices.items():
+            if not hasattr(adapter, "energy_days"):
+                continue
+            source, health = f"device:{name}", f"energy:{name}"
+            try:
+                days = await adapter.energy_days(today - timedelta(days=ENERGY_DAYS - 1), today, self.tz)
+                self.db.upsert_energy(source, [(int(t.timestamp()), 24 * 60, kwh) for t, kwh in days])
+                for d in self._hourly_days_to_fetch(source, today):
+                    hours = await adapter.energy_hours(d, self.tz)
+                    self.db.upsert_energy(source, [(int(t.timestamp()), 60, kwh) for t, kwh in hours])
+                    if d < today - timedelta(days=1):
+                        self._energy_done.add((source, d))  # even if empty — don't ask again
+            except Exception as e:
+                self._failed(health, e)
+                continue
+            self._ok(health)
+
+    def _hourly_days_to_fetch(self, source: str, today: date) -> list[date]:
+        """Today and yesterday (still being corrected), plus earlier days in MELCloud's hourly window with no data."""
+        days = [today, today - timedelta(days=1)]
+        for back in range(2, ENERGY_HOURLY_DAYS):
+            d = today - timedelta(days=back)
+            if (source, d) in self._energy_done:
+                continue
+            start = datetime.combine(d, datetime.min.time(), self.tz)
+            rows = self.db.energy(source, int(start.timestamp()), int((start + timedelta(days=1)).timestamp()))
+            if any(r["minutes"] == 60 for r in rows):
+                self._energy_done.add((source, d))
+            else:
+                days.append(d)
+        return days
 
     async def log_sensors(self) -> None:
         now = time.time()
@@ -211,6 +257,8 @@ class Collector:
         self._tasks.append(every(PRICE_CHECK_SECONDS, self.update_prices, "prices"))
         self._tasks.append(every(WEATHER_SECONDS, self.update_weather, "weather"))
         self._tasks.append(every(HEALTH_SECONDS, self.check_health, "health"))
+        if any(hasattr(a, "energy_days") for a in self.devices.values()):
+            self._tasks.append(every(ENERGY_SECONDS, self.update_energy, "energy"))
         self.db.add_event("info", "app", f"started: {len(self.devices)} devices, {len(self.sensors)} sensors")
 
     async def stop(self) -> None:

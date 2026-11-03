@@ -60,6 +60,7 @@ class MillLocalAdapter:
             power_on=d.get("operation_mode") != "Off",
             is_heating=bool(power) if power is not None else None,
             power_w=power,
+            mode=d.get("operation_mode"),
             raw=d,
         )
 

@@ -109,7 +109,11 @@ The unit is registered in **classic MELCloud**, which has a well-known (unoffici
 **Heat pump specifics**
 - Modulating, not on/off. Small setpoint shifts only (±2 °C from preferred, ≤ 1 change per hour).
 - Setpoint range via MELCloud: **10–31 °C**, step 0.5 (confirmed in phase 0) — the living area can follow Away.
-- MELCloud reports a cumulative energy counter → hourly kWh for COP learning.
+- Energy comes from MELCloud's **energy report**, not its running counter: the counter (`CurrentEnergyConsumed`)
+  stopped following real use on 2026-10-22 (~0.7 instead of 3–5 kWh/day). The report gives **daily** kWh (matches
+  the MELCloud app and the monthly total; ≤ 31 days per request) and, for about the last two weeks, **hourly** kWh
+  in 0.575 kWh steps that add up to ~15 % more than the daily figure — use hourly for the shape of the day and scale
+  it to the daily total for COP learning.
 - Default COP curve (refined from MELCloud energy data later):
 
   | Outdoor °C | +10 | +7 | +2 | −7 | −15 | −20 | −25 |
@@ -311,7 +315,8 @@ Precedence: Hold > Boost > Away > Home-today > Flex > Plan > Schedule fallback. 
 | Table | Key columns |
 |---|---|
 | `zones` | id, name, kind, adapter config, schedule refs, mode overrides, flex rules |
-| `readings` / `readings_15m` | ts, zone_id, air/floor temp, setpoint, power_on, is_heating, power_w, energy_kwh |
+| `readings` / `readings_15m` | ts, zone_id, air/floor temp, setpoint, power_on, is_heating, power_w, energy_kwh, mode |
+| `energy` | source, ts, minutes (1440 daily / 60 hourly), kwh — from the device's energy report (MELCloud) |
 | `prices` | ts_start, resolution_min, eur_mwh |
 | `tariffs` | valid_from, components |
 | `weather` | ts, issued_at, temp, wind, radiation, cloud |

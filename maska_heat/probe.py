@@ -4,7 +4,7 @@
     python -m maska_heat.probe weather
     python -m maska_heat.probe mill [--take-control] [--set 21] [--release-control]
     python -m maska_heat.probe adax [--set 21]
-    python -m maska_heat.probe melcloud [--set 21]
+    python -m maska_heat.probe melcloud [--set 21] [--energy 35]
     python -m maska_heat.probe sensor living [--seconds 20]
 
 Reads are always safe. Anything that changes a device needs an explicit flag.
@@ -42,6 +42,7 @@ def _print_state(label: str, s: DeviceState, raw: bool = True) -> None:
     print(f"  heating   : {s.is_heating}")
     print(f"  power     : {s.power_w} W")
     print(f"  energy    : {s.energy_kwh} kWh")
+    print(f"  mode      : {s.mode}")
     if raw:
         print("  raw       : " + json.dumps(s.raw, ensure_ascii=False, default=str, indent=2).replace("\n", "\n  "))
 
@@ -132,6 +133,9 @@ async def probe_melcloud(cfg: dict, secrets: dict, args) -> None:
     email, password = require(secrets.get("melcloud") or {}, "email", "password", where="secrets.yaml → melcloud")
     mel = MelcloudAdapter(email, password, device_name=dev.get("device_name"))
     try:
+        if args.energy:
+            await probe_melcloud_energy(mel, args.energy, _tz(cfg))
+            return
         _print_state("Mitsubishi", await mel.read())
         print(f"  setpoint range: {mel.capabilities.setpoint_min}–{mel.capabilities.setpoint_max} step {mel.capabilities.setpoint_step}")
         if args.set is not None:
@@ -139,6 +143,28 @@ async def probe_melcloud(cfg: dict, secrets: dict, args) -> None:
             print(f"  → setpoint {args.set} °C sent")
     finally:
         await mel.aclose()
+
+
+async def probe_melcloud_energy(mel, days: int, tz: ZoneInfo) -> None:
+    today = datetime.now(tz).date()
+    start = today - timedelta(days=days)
+    rep = await mel.energy_report(start, today)
+    print(f"== MELCloud energy report {start} … {today}")
+    print("  keys: " + ", ".join(sorted(rep)))
+    labels = rep.get("Labels") or []
+    print(f"  LabelType={rep.get('LabelType')} labels={labels[:3]}…{labels[-3:]} ({len(labels)})")
+    for key in ("Heating", "Cooling", "Auto", "Dry", "Fan", "Other"):
+        if isinstance(rep.get(key), list) and any(rep[key]):
+            print(f"  {key:<8}: " + " ".join(f"{v:g}" for v in rep[key]))
+    for key, v in sorted(rep.items()):
+        if key.startswith("Total") or key in ("CoP", "LastUpdate", "FromDate", "ToDate"):
+            print(f"  {key}: {v}")
+
+    hourly = await mel.energy_report(today - timedelta(days=1), today - timedelta(days=1))
+    print(f"== Single day {today - timedelta(days=1)} (hourly?)")
+    print(f"  LabelType={hourly.get('LabelType')} labels={(hourly.get('Labels') or [])[:4]}… ({len(hourly.get('Labels') or [])})")
+    print("  Heating : " + " ".join(f"{v:g}" for v in hourly.get("Heating") or []))
+    print(f"  TotalHeatingConsumed: {hourly.get('TotalHeatingConsumed')}")
 
 
 async def probe_sensor(cfg: dict, secrets: dict, args) -> None:
@@ -169,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--set", type=float)
     mc = sub.add_parser("melcloud")
     mc.add_argument("--set", type=float)
+    mc.add_argument("--energy", type=int, metavar="DAYS", help="print the MELCloud energy report for the last DAYS days")
     s = sub.add_parser("sensor")
     s.add_argument("name", help="sensor name from config.yaml, e.g. living")
     s.add_argument("--seconds", type=float, default=20)

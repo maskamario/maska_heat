@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -24,10 +24,21 @@ CREATE TABLE IF NOT EXISTS readings (
     power_on    INTEGER,
     is_heating  INTEGER,
     power_w     REAL,
-    energy_kwh  REAL,
-    humidity    REAL
+    energy_kwh  REAL,                  -- device counter; unreliable for MELCloud (use the energy table)
+    humidity    REAL,
+    mode        TEXT                   -- device operating mode as reported (e.g. heat, Control individually)
 );
 CREATE INDEX IF NOT EXISTS readings_source_ts ON readings(source, ts);
+
+-- Electricity use per period from the device's own energy report (MELCloud: hourly)
+CREATE TABLE IF NOT EXISTS energy (
+    source      TEXT    NOT NULL,      -- 'device:<name>'
+    ts          INTEGER NOT NULL,      -- period start
+    minutes     INTEGER NOT NULL,
+    kwh         REAL    NOT NULL,
+    fetched_at  INTEGER NOT NULL,
+    PRIMARY KEY (source, ts, minutes)
+);
 
 CREATE TABLE IF NOT EXISTS prices (
     ts       INTEGER NOT NULL,
@@ -91,6 +102,7 @@ class Reading:
     power_w: float | None = None
     energy_kwh: float | None = None
     humidity: float | None = None
+    mode: str | None = None
 
 
 def _b(v: bool | None) -> int | None:
@@ -108,7 +120,13 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+    def _migrate(self) -> None:
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(readings)")}
+        if "mode" not in cols:  # added in schema 3
+            self._conn.execute("ALTER TABLE readings ADD COLUMN mode TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -138,9 +156,10 @@ class Database:
 
     def add_readings(self, readings: list[Reading]) -> None:
         self._many(
-            "INSERT INTO readings VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO readings (ts, source, temp, setpoint, power_on, is_heating, power_w, energy_kwh, humidity, mode)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             [
-                (r.ts, r.source, r.temp, r.setpoint, _b(r.power_on), _b(r.is_heating), r.power_w, r.energy_kwh, r.humidity)
+                (r.ts, r.source, r.temp, r.setpoint, _b(r.power_on), _b(r.is_heating), r.power_w, r.energy_kwh, r.humidity, r.mode)
                 for r in readings
             ],
         )
@@ -166,6 +185,20 @@ class Database:
     def last_price_ts(self) -> int | None:
         row = self._all("SELECT MAX(ts + minutes*60) AS end_ts FROM prices")[0]
         return row["end_ts"]
+
+    # energy -------------------------------------------------------------------
+
+    def upsert_energy(self, source: str, points: list[tuple[int, int, float]]) -> None:
+        now = int(time.time())
+        self._many(
+            "INSERT OR REPLACE INTO energy (source, ts, minutes, kwh, fetched_at) VALUES (?,?,?,?,?)",
+            [(source, ts, minutes, kwh, now) for ts, minutes, kwh in points],
+        )
+
+    def energy(self, source: str, since: int, until: int) -> list[sqlite3.Row]:
+        return self._all(
+            "SELECT * FROM energy WHERE source=? AND ts>=? AND ts<? ORDER BY ts", (source, since, until)
+        )
 
     # weather ------------------------------------------------------------------
 

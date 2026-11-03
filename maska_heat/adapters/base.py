@@ -38,6 +38,7 @@ class DeviceState:
     is_heating: bool | None
     power_w: float | None = None
     energy_kwh: float | None = None
+    mode: str | None = None  # operating mode as the device reports it
     online: bool = True
     raw: dict[str, Any] = field(default_factory=dict)
 
