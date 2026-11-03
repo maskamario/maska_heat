@@ -52,6 +52,7 @@ class Executor:
         self._locks: dict[str, asyncio.Lock] = {}
         self._blocked_noted: dict[str, str] = {}
         self._mill_taken: set[str] = set()  # Mills switched to 'Control individually' since this process started
+        self._preheating_for: dict[str, datetime] = {}  # zone -> start of the slot being pre-heated for
         self._task: asyncio.Task | None = None
 
     def snapshot(self) -> Snapshot:
@@ -91,7 +92,10 @@ class Executor:
 
         view = next(v for v in zone_views(self.settings, self.db, now) if v.key == zone_key)
         kind = self.devices[zone.device].capabilities.kind
-        target = smart_target(zone_key, datetime.fromtimestamp(now, self.tz), view.temp, kind, snap or self.snapshot())
+        target = smart_target(
+            zone_key, datetime.fromtimestamp(now, self.tz), view.temp, kind, snap or self.snapshot(),
+            preheating_for=self._preheating_for.get(zone_key),
+        )
         return ZoneDecision("smart", target.setpoint, target.reason, smart=target, blocked=blocked)
 
     # applying -----------------------------------------------------------------
@@ -114,11 +118,16 @@ class Executor:
         ctl = self.store.zone(zone_key)
 
         if ctl.mode == "handsoff":
+            self._preheating_for.pop(zone_key, None)
             if ctl.engaged:
                 await self._release(zone_key, adapter, ctl)
             return
 
         decision = self.decide(zone_key)
+        if decision.smart and decision.smart.preheat_for:
+            self._preheating_for[zone_key] = decision.smart.preheat_for
+        else:
+            self._preheating_for.pop(zone_key, None)
         if decision.blocked:
             if self._blocked_noted.get(zone_key) != decision.blocked:
                 self._blocked_noted[zone_key] = decision.blocked

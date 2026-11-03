@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from zoneinfo import ZoneInfo
@@ -87,3 +87,54 @@ def test_preheat_before_return_from_school_and_next_change():
 def test_no_preheat_for_cooler_period():
     t = smart_target("living", at(MON, 22, 30), 22.0, "heat_pump", snap())
     assert not t.preheating and t.setpoint == 22
+
+
+def test_change_time_is_exact_not_scan_step():
+    t = smart_target("madli", at(MON, 10, 46), 18.5, "resistive", snap())
+    assert t.preheat_for == at(MON, 13) and "13:00" in t.reason
+    calm = smart_target("madli", at(MON, 9, 1), 21.0, "resistive", snap())
+    assert calm.next_change[0] == at(MON, 13)
+
+
+def test_preheat_latch_holds_until_slot_starts():
+    # at 12:31 a 21.9 °C room is ahead of schedule (lead 0.35 h < 0.48 h left) → would drop back to Out
+    free = smart_target("madli", at(MON, 12, 31), 21.9, "resistive", snap())
+    assert not free.preheating and free.setpoint == 19
+    held = smart_target("madli", at(MON, 12, 31), 21.9, "resistive", snap(), preheating_for=at(MON, 13))
+    assert held.preheating and held.setpoint == 22 and held.preheat_for == at(MON, 13)
+
+
+def test_stale_latch_is_ignored():
+    # latch for a slot that no longer starts then (e.g. "home today" set) has no effect
+    t = smart_target("madli", at(MON, 12, 31), 21.0, "resistive", snap(home_today={"madli": MON}), preheating_for=at(MON, 13))
+    assert not t.preheating and t.mode == "day" and t.setpoint == 22
+
+
+def test_preheat_does_not_flip_flop():
+    """Replays 13.10: a room that warms 1.2 °C/h while heating and cools 0.5 °C/h otherwise, decided every 5 min."""
+
+    def replay(latching: bool) -> list[float]:
+        temp, latch, setpoints = 19.0, None, []
+        t = at(MON, 9)
+        while t < at(MON, 13):
+            target = smart_target("madli", t, temp, "resistive", snap(), preheating_for=latch)
+            latch = target.preheat_for if latching else None
+            setpoints.append(target.setpoint)
+            temp += (1.2 if temp < target.setpoint else -0.5) * 5 / 60
+            t += timedelta(minutes=5)
+        return setpoints
+
+    def changes(sp: list[float]) -> int:
+        return sum(a != b for a, b in zip(sp, sp[1:]))
+
+    assert changes(replay(latching=False)) > 4  # the old behaviour
+    held = replay(latching=True)
+    assert changes(held) == 1 and held[-1] == 22
+
+
+def test_latch_survives_runs_with_odd_seconds():
+    first = smart_target("madli", at(MON, 10, 46) + timedelta(seconds=23), 18.5, "resistive", snap())
+    later = smart_target(
+        "madli", at(MON, 12, 51) + timedelta(seconds=41), 21.9, "resistive", snap(), preheating_for=first.preheat_for
+    )
+    assert first.preheat_for == at(MON, 13) and later.preheating

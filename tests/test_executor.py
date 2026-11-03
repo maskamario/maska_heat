@@ -123,3 +123,29 @@ async def test_device_error_becomes_event(rig):
     store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20))
     await ex.apply_zone("madli")
     assert "cloud down" in db.events(1)[0]["message"]
+
+
+async def test_smart_remembers_preheat_between_runs(rig, monkeypatch):
+    from datetime import datetime, timezone
+
+    import maska_heat.executor as executor_mod
+    from maska_heat.schedule import Slot, SmartTarget
+
+    ex, store, db, adax, _ = rig
+    reading(db, "madli_adax", 19)
+    store.set_zone("madli", ZoneControl(mode="smart"))
+    slot_start = datetime(2026, 10, 12, 13, 0, tzinfo=timezone.utc)
+    seen: list = []
+
+    def fake_target(zone, now, temp, kind, snap, preheating_for=None):
+        seen.append(preheating_for)
+        return SmartTarget("day", 22.0, True, "pre-heating", (slot_start, Slot("day", 22.0)), preheat_for=slot_start)
+
+    monkeypatch.setattr(executor_mod, "smart_target", fake_target)
+    await ex.apply_zone("madli")
+    await ex.apply_zone("madli")
+    assert seen == [None, slot_start]
+
+    store.set_zone("madli", ZoneControl(mode="handsoff", engaged=True, restore_setpoint=19))
+    await ex.apply_zone("madli")
+    assert "madli" not in ex._preheating_for

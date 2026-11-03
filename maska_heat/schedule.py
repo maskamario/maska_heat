@@ -44,6 +44,7 @@ class SmartTarget:
     preheating: bool
     reason: str
     next_change: tuple[datetime, Slot] | None
+    preheat_for: datetime | None = None  # start of the warmer slot being pre-heated for
 
 
 def is_weekend_like(d: date) -> bool:
@@ -80,28 +81,55 @@ def slot_at(zone: str, t: datetime, snap: Snapshot) -> Slot:
     return Slot("day", c.day.preferred)
 
 
-def smart_target(zone: str, now: datetime, current_temp: float | None, kind: str, snap: Snapshot) -> SmartTarget:
-    """Setpoint to apply now. Starts heating early when a warmer slot is coming up."""
+def _change_start(zone: str, before: datetime, after: datetime, snap: Snapshot) -> datetime:
+    """First whole minute in (before, after] whose slot differs from the slot at `before`. Whole minutes keep the
+    result identical between runs started a few seconds apart, so it can be compared with a remembered value."""
+    base = slot_at(zone, before, snap)
+    t = before.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    while t < after and slot_at(zone, t, snap) == base:
+        t += timedelta(minutes=1)
+    return t
+
+
+def smart_target(
+    zone: str,
+    now: datetime,
+    current_temp: float | None,
+    kind: str,
+    snap: Snapshot,
+    preheating_for: datetime | None = None,
+) -> SmartTarget:
+    """Setpoint to apply now. Starts heating early when a warmer slot is coming up.
+
+    Once pre-heating has started for a slot (`preheating_for`, remembered by the caller), it continues until that
+    slot begins, even when the room gets ahead of schedule — otherwise the setpoint flips between the two slots
+    every few minutes as the room warms and cools around the lead-time line.
+    """
     current = slot_at(zone, now, snap)
     rate = DEFAULT_HEATING_RATE.get(kind, 1.0)
     start_temp = current_temp if current_temp is not None else current.setpoint
 
     next_change = None
     preheat: tuple[datetime, Slot] | None = None
+    prev_t, prev = now, current
     t = now + STEP
-    while t <= now + LOOKAHEAD:
+    while t <= now + LOOKAHEAD and preheat is None:
         s = slot_at(zone, t, snap)
-        if next_change is None and s != current:
-            next_change = (t, s)
-        if preheat is None and s.setpoint > current.setpoint + 0.05:
-            need = max(s.setpoint - start_temp, 0.0)
-            lead_h = min(need / rate + LEAD_MARGIN_HOURS, MAX_LEAD_HOURS)
-            if (t - now).total_seconds() / 3600 <= lead_h:
-                preheat = (t, s)
+        if s != prev:
+            begins = _change_start(zone, prev_t, t, snap)
+            s = slot_at(zone, begins, snap)
+            if next_change is None:
+                next_change = (begins, s)
+            if s.setpoint > current.setpoint + 0.05:
+                need = max(s.setpoint - start_temp, 0.0)
+                lead_h = min(need / rate + LEAD_MARGIN_HOURS, MAX_LEAD_HOURS)
+                if begins == preheating_for or (begins - now).total_seconds() / 3600 <= lead_h:
+                    preheat = (begins, s)
+        prev_t, prev = t, slot_at(zone, t, snap)
         t += STEP
 
     if preheat:
         at, s = preheat
         reason = f"pre-heating for {MODE_LABEL[s.mode]} at {at:%H:%M}"
-        return SmartTarget(s.mode, s.setpoint, True, reason, next_change)
+        return SmartTarget(s.mode, s.setpoint, True, reason, next_change, preheat_for=at)
     return SmartTarget(current.mode, current.setpoint, False, MODE_LABEL[current.mode], next_change)
