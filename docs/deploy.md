@@ -10,7 +10,7 @@ Use **Raspberry Pi Imager** → *Raspberry Pi OS Lite (64-bit)*. In the settings
 - Locale: timezone `Europe/Tallinn`
 - WiFi: not needed — the Pi is on Ethernet
 
-Plug in Ethernet + power. In the router, reserve a fixed address for the Pi (e.g. `192.168.1.10`).
+Plug in Ethernet + power. In the router, reserve a fixed address for the Pi (ours: `192.168.1.20`).
 
 ## 2. Base system
 
@@ -62,7 +62,7 @@ systemctl status maska-heat
 journalctl -u maska-heat -f        # live log, Ctrl+C to leave
 ```
 
-Dashboard: **http://maska-heat.local:8000** (or `http://192.168.1.10:8000`) from any phone or laptop at home.
+Dashboard: **http://maska-heat.local:8000** (or `http://192.168.1.20:8000`) from any phone or laptop at home.
 
 ## 5. Notifications (ntfy)
 
@@ -77,7 +77,7 @@ Dashboard: **http://maska-heat.local:8000** (or `http://192.168.1.10:8000`) from
 ### At home (WiFi)
 
 1. Find the Pi's address: on the Pi run `hostname -I` (first number), or use the address reserved in the router.
-2. On the phone, open Chrome → `http://<pi-address>:8000` (e.g. `http://192.168.1.10:8000`).
+2. On the phone, open Chrome → `http://<pi-address>:8000` (ours: `http://192.168.1.20:8000`).
    `http://maska-heat.local:8000` also works on many Android phones, but the IP address always does.
 3. Chrome menu ⋮ → **Add to Home screen**. The app gets the Maska Heat icon.
 
