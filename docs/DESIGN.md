@@ -13,27 +13,62 @@ See README.md → "Status & next steps".
 ## 1. House & zones
 
 ```
-        ┌──────────────┬────────┬──────────────┐
-        │ Madli's      │  Hall  │ Matis's      │
-        │ bedroom      │(no     │ bedroom      │
-        │ Adax 600 W   │ heater)│ Mill 1500 W  │
-        └──────────────┴────────┴──────────────┘
-        ┌──────────────────────────────────────┐
-        │ Living area (living room + kitchen)  │
-        │ Mitsubishi heat pump                  │
-        │ Masonry heater · Wood cookstove +     │
-        │ thermal mass wall                     │
-        └──────────────────────────────────────┘
-        Bathroom(s): electric floor heating — later
+ UPSTAIRS (sloped ceilings, 1.6–2.0 m)
+        ┌───────────────────────────────┐
+        │ Madli's bedroom  7.8 m²       │
+        │ Adax 600 W                    │
+        └───────────door────────────────┘
+        ┌───────────────────────────────┐ ┌──────────────────────────────┐
+        │ Hall 14.1 m² (no heater)      │─│ Workspace (ABIRUUM 3) 5.5 m² │
+        │ open stair ↓ · chimney passes │ │ door almost always open      │
+        └───────────door────────────────┘ └──────────────────────────────┘
+        ┌───────────────────────────────┐
+        │ Matis's bedroom  7.7 m²       │
+        │ Mill 1500 W                   │
+        └───────────────────────────────┘
+
+ GROUND FLOOR
+        ┌───────────────────────┬──────────────────────────────────┐
+        │ Bathroom 1 / WC 8.4 m² + sauna 3.0 m²                    │
+        ├───────────────────────┼────────────┬─────────────────────┤
+        │ Kitchen 17.6 m²       │ open stair │ cookstove │Bathroom 2│
+        │                       │ ↑          │ + mass    │ 4.6 m²   │
+        │                       │            │ wall      │ floor ht.│
+        │ Dining 20.8 m²        │ masonry    ├───────────┴──────────┤
+        │ (open plan)           │ heater     │ Living room 18.3 m²  │
+        │                       ├────────────┤                      │
+        │ ▓ heat pump (indoor)  │ Entrance 3.2 m²                   │
+        └───────────────────────┴───────────────────────────────────┘
+        Living area ≈ 57 m² (kitchen + dining + living room); open to the upstairs hall via the stair
 ```
+
+Floor plans for reference: [ground floor](floorplan-ground.png), [upstairs](floorplan-upstairs.png). Names on the
+upstairs plan: ABIRUUM 2 = Madli, ABIRUUM 1 = Matis, ELUTUBA = hall, ABIRUUM 3 = workspace. On the ground floor
+ABIRUUM 1 is now bathroom 2, the two-circle symbol beside it is the wood cookstove, and the heat pump's indoor unit
+(not on the plan) is on the outer wall at the bottom of SÖÖGITUBA, by the window left of the entrance (TAMBUR).
 
 | Zone | Controlled device | Uncontrolled heat sources |
 |---|---|---|
 | **Madli's bedroom** | ADAX Clea H 06 WiFi, panel heater, 600 W | — |
 | **Matis's bedroom** | Mill OIL1500WIFI3 (Gen 3), oil radiator, 1500 W | — |
 | **Living area** (living room + kitchen) | Mitsubishi MSZ-LN35VG2W / MUZ-LN35VGHZ2 heat pump (Hyper Heating) + **IKEA TIMMERFLOTTE room sensor** (planned, §3.6) | Masonry heater, wood cookstove with thermal mass wall |
-| **Hall** (between kids' rooms) | none — passive | Gets heat from neighbouring zones. Optional sensor later |
-| **Bathroom(s)** | Floor heating + thermostat — **deferred**, design hook only (§3.5) | — |
+| **Hall** (upstairs, between kids' rooms) | none — passive | Gets heat from neighbouring zones and up the open stair; the masonry heater's chimney passes through it but adds little heat. Sensor planned (§3.6) |
+| **Bathroom 2** (ground floor, 4.6 m², former ABIRUUM 1) | Electric floor heating, **Heatline HL-05** Wi-Fi thermostat (Tuya / Smart Life, = Hysen HY511WE) — installed, **not integrated yet** (§3.5) | Next to the wood cookstove |
+| **Bathroom 1** (ground floor, 8.4 m² + sauna) | Floor heating + thermostat — **deferred**, design hook only (§3.5) | Sauna |
+
+### 1.1 Open doors and coupled spaces
+
+The kids' doors open into the hall **at random times** (no pattern), and the hall is open to the workspace and, via
+the stair, to the living area downstairs. With a door open, a bedroom heater warms the bedroom + hall (≈ 3× the
+area): the room heats much more slowly, cools faster, and its temperature drifts toward the hall's. Matis's 1500 W
+Mill can noticeably heat the hall; Madli's 600 W Adax mostly can't keep up with an open door. Both open → the two
+bedrooms and the hall act as one space.
+
+Consequences:
+- **Learning (§7):** door state is a model input. A single fit over mixed door states would be wrong for both.
+- **Control:** pre-heat lead times assume a closed door; with it open, the target may come late or not at all.
+- **Sensors (§3.6):** door sensors on both kids' doors + a hall sensor make door state and the neighbour
+  temperature known instead of guessed.
 
 Weather location: Luige, Kiili vald, Harjumaa (≈ 59.33 N, 24.74 E, exact value in config).
 
@@ -185,7 +220,8 @@ Not recommended: Tuya/Smart Life WiFi sensors (cloud-bound, local keys break wit
 |---|---|---|
 | Living area | **Buy now** | Interior wall, ~1.5 m high, away from masonry heater, cookstove, heat pump airflow, windows and direct sun |
 | Outdoor | Recommended | Shaded north wall, under eaves — local outdoor temp beats the forecast for model fitting |
-| Hall | Nice to have | Mid-hall — shows heat flow between kids' rooms |
+| Hall | **With the IKEA order** (TIMMERFLOTTE) | Mid-hall, away from the stair opening and chimney — the temperature the kids' rooms exchange heat with (§1.1) |
+| Kids' doors | **With the IKEA order** (2 × PARASOLL door/window sensor, same DIRIGERA hub) | On each kids' bedroom door — open/closed as a model input (§1.1) |
 | Kids' bedrooms | Later | Improves those models vs heater-built-in sensors |
 
 **Zone temperature source** is a priority list per zone, e.g. living area = `[esphome:living, mitsubishi]`:
@@ -352,7 +388,12 @@ T[k+1] = T[k] + Δt · ( a·u_eff[k]  −  b·(T[k] − T_out[k])  +  c·solar[k
 - Rolling 14-day least squares, nightly refit; staged: `b,c` from idle no-fire periods → `a, τ_lag` → fire params.
 - Outlier rejection (windows, doors, cooking, showers, first minutes after setpoint change).
 - Confidence score; low confidence → conservative defaults (pre-heat earlier).
-- Kids' rooms models implicitly include heat exchange with the unheated hall.
+- Kids' rooms exchange heat with the hall: `− b_hall(door)·(T − T_hall)` with a small `b_hall` for a closed door and a
+  much larger one when open (§1.1). `T_hall` from the hall sensor; until it exists, folded into the outdoor term.
+- **Door state** — until door sensors exist, inferred from the data and treated as unknown: periods where the room
+  heats far slower than predicted at full power, or cools far faster than usual, are flagged "door probably open"
+  and fitted separately or left out. Best for the Mill (power every minute), weaker for the Adax (energy per hour).
+  The model takes door state as an input from the start, so door sensors only replace the guess.
 - Built-in sensors are biased (Mitsubishi near ceiling, radiators near the heater); models learn in "device-sensor"
   units, consistent with what the thermostats regulate. Refit against external sensors if added.
 
