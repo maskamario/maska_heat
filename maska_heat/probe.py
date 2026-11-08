@@ -6,6 +6,7 @@
     python -m maska_heat.probe adax [--set 21]
     python -m maska_heat.probe melcloud [--set 21] [--energy 35]
     python -m maska_heat.probe sensor living [--seconds 20]
+    python -m maska_heat.probe dirigera [--host 192.168.1.30]
 
 Reads are always safe. Anything that changes a device needs an explicit flag.
 """
@@ -180,6 +181,26 @@ async def probe_sensor(cfg: dict, secrets: dict, args) -> None:
         print(f"  {r.name:<20} {r.value:8.2f} {r.unit}")
 
 
+async def probe_dirigera(cfg: dict, secrets: dict, args) -> None:
+    from .sensors.dirigera import DirigeraHub
+
+    host = args.host or (cfg.get("dirigera") or {}).get("host")
+    if not host:
+        raise ConfigError("no dirigera: host in config.yaml (or pass --host)")
+    (token,) = require(secrets.get("dirigera") or {}, "token", where="secrets.yaml → dirigera")
+    hub = DirigeraHub(host, token)
+    try:
+        devices = await hub.devices()
+    finally:
+        await hub.aclose()
+    now = datetime.now(timezone.utc).timestamp()
+    print(f"== DIRIGERA {host}: {len(devices)} sensors (names as in the IKEA Home app)")
+    for d in devices.values():
+        ago = f"{(now - d.last_seen) / 60:.0f} min ago" if d.last_seen else "never"
+        value = f"{d.temp} °C, {d.humidity} %" if d.kind == "environment" else ("open" if d.is_open else "closed")
+        print(f"  {d.kind:<11} {d.name!r:<24} {value:<18} reachable={d.reachable} last report {ago}, battery {d.battery} %")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="maska-probe", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="target", required=True)
@@ -199,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("sensor")
     s.add_argument("name", help="sensor name from config.yaml, e.g. living")
     s.add_argument("--seconds", type=float, default=20)
+    dg = sub.add_parser("dirigera")
+    dg.add_argument("--host", help="override dirigera host from config.yaml")
     args = parser.parse_args(argv)
 
     try:
@@ -214,6 +237,8 @@ def main(argv: list[str] | None = None) -> int:
             coro = probe_adax(cfg, secrets, args)
         elif args.target == "melcloud":
             coro = probe_melcloud(cfg, secrets, args)
+        elif args.target == "dirigera":
+            coro = probe_dirigera(cfg, secrets, args)
         else:
             coro = probe_sensor(cfg, secrets, args)
         asyncio.run(coro)

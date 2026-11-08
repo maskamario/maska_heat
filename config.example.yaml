@@ -43,19 +43,29 @@ devices:
     enabled: false            # enable once MELCloud login is in secrets.yaml
     device_name: null         # MELCloud device name; null = first air-to-air unit
 
-# Room sensors. Planned: IKEA TIMMERFLOTTE via the DIRIGERA hub (type `dirigera`, not implemented yet).
-# ESPHome devices work today (see esphome/).
+# IKEA DIRIGERA hub (local API; token in secrets.yaml → dirigera). Sensors and doors are matched by their name in
+# the IKEA Home app. Check with: python -m maska_heat.probe dirigera
+dirigera:
+  host: 192.168.1.30           # reserve this address for the hub in the router
+  poll_seconds: 15
+
+# Room sensors: type dirigera (IKEA TIMMERFLOTTE) or esphome (see esphome/).
 sensors:
   living:
-    type: esphome
-    enabled: false            # enable once the sensor is flashed and on WiFi
-    host: maska-living-sensor.local
+    type: dirigera
+    device: Allkorrus         # name in the IKEA Home app; living room, inner wall
   outdoor:
     type: esphome
     enabled: false
     host: maska-outdoor-sensor.local
 
 outdoor_sensor: outdoor       # used instead of the forecast when it has fresh data
+
+# Door sensors (IKEA MYGGBETT): open = the room is coupled to the hall (docs/DESIGN.md §1.1)
+doors:
+  matis:
+    device: Matise uks        # name in the IKEA Home app
+    zone: matis
 
 zones:
   madli:

@@ -66,10 +66,32 @@ class DeviceSettings(BaseModel):
 
 
 class SensorSettings(BaseModel):
-    type: Literal["esphome"] = "esphome"
+    type: Literal["esphome", "dirigera"] = "esphome"
     enabled: bool = True
+    host: str | None = None  # esphome
+    port: int = 6053  # esphome
+    device: str | None = None  # dirigera: the sensor's name in the IKEA Home app
+
+    @model_validator(mode="after")
+    def _required(self) -> "SensorSettings":
+        if self.type == "esphome" and not self.host:
+            raise ValueError("esphome sensor needs host")
+        if self.type == "dirigera" and not self.device:
+            raise ValueError("dirigera sensor needs device (its name in the IKEA Home app)")
+        return self
+
+
+class DirigeraSettings(BaseModel):
     host: str
-    port: int = 6053
+    poll_seconds: int = 15
+
+
+class DoorSettings(BaseModel):
+    """Door sensor on a zone's door (open = the room is coupled to the next space, docs/DESIGN.md §1.1)."""
+
+    device: str  # name in the IKEA Home app
+    zone: str
+    enabled: bool = True
 
 
 class ZoneSettings(BaseModel):
@@ -100,6 +122,8 @@ class Settings(BaseModel):
     tariff: TariffSettings = TariffSettings()
     devices: dict[str, DeviceSettings] = {}
     sensors: dict[str, SensorSettings] = {}
+    dirigera: DirigeraSettings | None = None
+    doors: dict[str, DoorSettings] = {}
     outdoor_sensor: str | None = None
     zones: dict[str, ZoneSettings] = {}
     notify: NotifySettings = NotifySettings()
@@ -118,6 +142,14 @@ class Settings(BaseModel):
                 pool = {"device": self.devices, "sensor": self.sensors}.get(kind)
                 if pool is None or name not in pool:
                     raise ValueError(f"zone {key!r}: unknown temperature source {src!r}")
+        for key, door in self.doors.items():
+            if door.zone not in self.zones:
+                raise ValueError(f"door {key!r}: unknown zone {door.zone!r}")
+        uses_hub = any(s.type == "dirigera" and s.enabled for s in self.sensors.values()) or any(
+            d.enabled for d in self.doors.values()
+        )
+        if uses_hub and self.dirigera is None:
+            raise ValueError("dirigera sensors or doors are configured but the dirigera: host is missing")
         if self.outdoor_sensor and self.outdoor_sensor not in self.sensors:
             raise ValueError(f"outdoor_sensor: unknown sensor {self.outdoor_sensor!r}")
         return self

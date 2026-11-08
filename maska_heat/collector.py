@@ -18,6 +18,7 @@ from .db import Database, Reading
 from .notify import Notifier
 from .providers.prices import fetch_prices
 from .providers.weather import fetch_forecast
+from .sensors.dirigera import DirigeraHub, DirigeraPoller, DirigeraSensor, HubError
 from .sensors.esphome import EsphomeSensor
 from .settings import DeviceSettings, Settings
 
@@ -75,7 +76,8 @@ class Collector:
         self.notifier = notifier
         self.tz = ZoneInfo(settings.location.timezone)
         self.devices: dict[str, DeviceAdapter] = {}
-        self.sensors: dict[str, EsphomeSensor] = {}
+        self.sensors: dict[str, EsphomeSensor | DirigeraSensor] = {}
+        self.dirigera: DirigeraPoller | None = None
         self.health: dict[str, SourceHealth] = {}
         self._tasks: list[asyncio.Task] = []
         self._energy_done: set[tuple[str, date]] = set()  # past days whose energy report is stored
@@ -93,9 +95,34 @@ class Collector:
 
         keys = secrets.get("esphome") or {}
         for name, cfg in settings.sensors.items():
-            if cfg.enabled:
+            if cfg.enabled and cfg.type == "esphome":
                 self.sensors[name] = EsphomeSensor(name, cfg.host, keys.get(name), cfg.port)
                 self.health[f"sensor:{name}"] = SourceHealth(name, now)
+        self._setup_dirigera(secrets, now)
+
+    def _setup_dirigera(self, secrets: dict[str, Any], now: float) -> None:
+        hub_sensors = [
+            DirigeraSensor(name, cfg.device)
+            for name, cfg in self.settings.sensors.items()
+            if cfg.enabled and cfg.type == "dirigera"
+        ]
+        doors = {name: d.device for name, d in self.settings.doors.items() if d.enabled}
+        if not hub_sensors and not doors:
+            return
+        token = (secrets.get("dirigera") or {}).get("token")
+        if not token:
+            msg = "dirigera: token missing in secrets.yaml — hub sensors and doors are not read"
+            log.warning("%s", msg)
+            self.db.add_event("warning", "dirigera", msg)
+            return
+        cfg = self.settings.dirigera
+        self.dirigera = DirigeraPoller(DirigeraHub(cfg.host, token), hub_sensors, doors, self._door_changed, cfg.poll_seconds)
+        self.health["dirigera"] = SourceHealth("DIRIGERA hub", now)
+        for s in hub_sensors:
+            self.sensors[s.name] = s
+            self.health[f"sensor:{s.name}"] = SourceHealth(s.name, now)
+        for name in doors:
+            self.health[f"door:{name}"] = SourceHealth(f"{name} door sensor", now)
 
     # jobs ---------------------------------------------------------------------
 
@@ -153,6 +180,22 @@ class Collector:
                 days.append(d)
         return days
 
+    async def poll_dirigera(self) -> None:
+        try:
+            await self.dirigera.poll()
+        except HubError as e:
+            self._failed("dirigera", e)
+            return
+        self._ok("dirigera")
+        for name, error in self.dirigera.door_errors.items():
+            if error:
+                self._failed(f"door:{name}", error)
+            else:
+                self._ok(f"door:{name}")
+
+    def _door_changed(self, name: str, ts: int, is_open: bool) -> None:
+        self.db.add_door_state(f"door:{name}", ts, is_open)
+
     async def log_sensors(self) -> None:
         now = time.time()
         rows = []
@@ -161,7 +204,7 @@ class Collector:
             if sensor.updated_at and now - sensor.updated_at < SENSOR_STALE_SECONDS:
                 rows.append(Reading(int(now), source, temp=sensor.temp, humidity=sensor.humidity))
                 self._ok(source)
-            elif not sensor.connected:
+            elif not sensor.connected and sensor.last_error:  # not yet tried is not a failure
                 self._failed(source, sensor.last_error or "not connected")
         self.db.add_readings(rows)
 
@@ -251,7 +294,10 @@ class Collector:
             if name in self.devices:
                 self._tasks.append(every(cfg.interval, lambda n=name: self.poll_device(n), f"poll:{name}"))
         for name, sensor in self.sensors.items():
-            self._tasks.append(asyncio.create_task(sensor.run(), name=f"sensor:{name}"))
+            if isinstance(sensor, EsphomeSensor):
+                self._tasks.append(asyncio.create_task(sensor.run(), name=f"sensor:{name}"))
+        if self.dirigera:
+            self._tasks.append(every(self.dirigera.interval, self.poll_dirigera, "dirigera"))
         if self.sensors:
             self._tasks.append(every(SENSOR_LOG_SECONDS, self.log_sensors, "log_sensors"))
         self._tasks.append(every(PRICE_CHECK_SECONDS, self.update_prices, "prices"))
@@ -259,7 +305,8 @@ class Collector:
         self._tasks.append(every(HEALTH_SECONDS, self.check_health, "health"))
         if any(hasattr(a, "energy_days") for a in self.devices.values()):
             self._tasks.append(every(ENERGY_SECONDS, self.update_energy, "energy"))
-        self.db.add_event("info", "app", f"started: {len(self.devices)} devices, {len(self.sensors)} sensors")
+        doors = len(self.dirigera.doors) if self.dirigera else 0
+        self.db.add_event("info", "app", f"started: {len(self.devices)} devices, {len(self.sensors)} sensors, {doors} doors")
 
     async def stop(self) -> None:
         for t in self._tasks:
@@ -269,3 +316,5 @@ class Collector:
             close = getattr(adapter, "aclose", None)
             if close:
                 await close()
+        if self.dirigera:
+            await self.dirigera.hub.aclose()

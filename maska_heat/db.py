@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS prices (
     minutes  INTEGER NOT NULL,
     eur_mwh  REAL    NOT NULL,
     PRIMARY KEY (ts, minutes)
+);
+
+-- Door open/closed changes (one row per change)
+CREATE TABLE IF NOT EXISTS doors (
+    ts       INTEGER NOT NULL,
+    source   TEXT    NOT NULL,         -- 'door:<name>'
+    is_open  INTEGER NOT NULL,
+    PRIMARY KEY (source, ts)
 );
 
 CREATE TABLE IF NOT EXISTS weather (
@@ -199,6 +207,23 @@ class Database:
         return self._all(
             "SELECT * FROM energy WHERE source=? AND ts>=? AND ts<? ORDER BY ts", (source, since, until)
         )
+
+    # doors --------------------------------------------------------------------
+
+    def add_door_state(self, source: str, ts: int, is_open: bool) -> bool:
+        """Record a door change. Returns False (and stores nothing) when it repeats the last known state."""
+        last = self.door_state_at(source, 2**62)
+        if last is not None and bool(last["is_open"]) == is_open:
+            return False
+        self._exec("INSERT OR REPLACE INTO doors (ts, source, is_open) VALUES (?,?,?)", (ts, source, int(is_open)))
+        return True
+
+    def door_state_at(self, source: str, ts: int) -> sqlite3.Row | None:
+        rows = self._all("SELECT * FROM doors WHERE source=? AND ts<=? ORDER BY ts DESC LIMIT 1", (source, ts))
+        return rows[0] if rows else None
+
+    def door_changes(self, source: str, since: int, until: int) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM doors WHERE source=? AND ts>=? AND ts<? ORDER BY ts", (source, since, until))
 
     # weather ------------------------------------------------------------------
 

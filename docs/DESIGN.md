@@ -174,16 +174,22 @@ unit's airflow and is biased. Independent sensors also make every zone model bet
 Bluetooth was ruled out (range through the house's walls).
 
 **Decision (2026-10-12): IKEA DIRIGERA hub + TIMMERFLOTTE sensors** — battery-powered (2 × AAA), wall-mounted,
-with a display, ~10 € per sensor + ~50 € hub once. Chosen for battery power and low cost per extra room
+with a display, 9 € per sensor + 89 € hub once (IKEA Eesti, 2026-11). Chosen for battery power and low cost per extra room
 (living area first; later kids' rooms, hall, bathroom humidity).
 
 - TIMMERFLOTTE is Matter-over-Thread; the DIRIGERA is the Thread border router. The Pi reads the sensors from the
   DIRIGERA's **local, unofficial API** with the `dirigera` Python library (token created once by pressing the
   hub's action button), polling every ~60 s. No cloud, nothing extra on the Pi.
-- Risks: the API is reverse-engineered and may change with hub firmware; the library is confirmed with
-  VINDSTYRKA, TIMMERFLOTTE still to be verified → buy one sensor first and verify before buying more.
-- To build: `DirigeraSensorAdapter` (sensor type `dirigera` in config: hub host + device name/ID, token in
-  secrets.yaml) feeding the same `sensor:<name>` readings as below. Not implemented yet.
+- Risks: the API is reverse-engineered and may change with hub firmware.
+- **Verified 2026-11-08** (hub firmware 2.975.4): TIMMERFLOTTE (temperature 0.01 °C, humidity; reports on change,
+  otherwise every few minutes; appears as two devices sharing a `relationId`) and **MYGGBETT** door sensor
+  (`isOpen`, reaches the hub within 1–2 s). IKEA no longer lists PARASOLL; MYGGBETT replaces it.
+- **Implemented** (`maska_heat/sensors/dirigera.py`): the app calls the hub's REST API directly with httpx
+  (`GET https://<hub>:8443/v1/devices`, bearer token) every 15 s — the `dirigera` library is only needed once for
+  `generate-token`. Config: `dirigera: host`, sensors with `type: dirigera` + `device:` (name in the IKEA Home app),
+  `doors:` (device + zone). Temperatures feed the usual `sensor:<name>` readings; door changes go to the `doors`
+  table with the hub's report time. Hub, each sensor and each door are health-checked (offline notification).
+  Probe: `python -m maska_heat.probe dirigera`.
 - Outdoor stays on the Open-Meteo forecast; optional ESPHome outdoor probe below.
 
 **Implemented and kept as option: ESP32 + sensor running ESPHome, USB-powered (~15–25 €).** Used for the optional
@@ -218,10 +224,10 @@ Not recommended: Tuya/Smart Life WiFi sensors (cloud-bound, local keys break wit
 
 | Sensor | Priority | Placement |
 |---|---|---|
-| Living area | **Buy now** | Interior wall, ~1.5 m high, away from masonry heater, cookstove, heat pump airflow, windows and direct sun |
+| Living area | **Installed 2026-11-08** ("Allkorrus") | Interior wall, ~1.5 m high, away from masonry heater, cookstove, heat pump airflow, windows and direct sun |
 | Outdoor | Recommended | Shaded north wall, under eaves — local outdoor temp beats the forecast for model fitting |
 | Hall | **With the IKEA order** (TIMMERFLOTTE) | Mid-hall, away from the stair opening and chimney — the temperature the kids' rooms exchange heat with (§1.1) |
-| Kids' doors | **With the IKEA order** (2 × PARASOLL door/window sensor, same DIRIGERA hub) | On each kids' bedroom door — open/closed as a model input (§1.1) |
+| Kids' doors | **With the IKEA order** (2 × MYGGBETT door/window sensor, same DIRIGERA hub) — Matis's installed 2026-11-08 | On each kids' bedroom door — open/closed as a model input (§1.1) |
 | Kids' bedrooms | Later | Improves those models vs heater-built-in sensors |
 
 **Zone temperature source** is a priority list per zone, e.g. living area = `[esphome:living, mitsubishi]`:
@@ -353,6 +359,7 @@ Precedence: Hold > Boost > Away > Home-today > Flex > Plan > Schedule fallback. 
 | `zones` | id, name, kind, adapter config, schedule refs, mode overrides, flex rules |
 | `readings` / `readings_15m` | ts, zone_id, air/floor temp, setpoint, power_on, is_heating, power_w, energy_kwh, mode |
 | `energy` | source, ts, minutes (1440 daily / 60 hourly), kwh — from the device's energy report (MELCloud) |
+| `doors` | ts, source (`door:<name>`), is_open — one row per change |
 | `prices` | ts_start, resolution_min, eur_mwh |
 | `tariffs` | valid_from, components |
 | `weather` | ts, issued_at, temp, wind, radiation, cloud |
