@@ -51,7 +51,7 @@
       </div>
       <p class="muted small">Stays at this temperature until you change it or switch mode.</p>
     {% elif ctl.mode == "smart" %}
-      <div class="target">{{ "%.1f" | format(decision.setpoint) }}<small> °C</small></div>
+      <div class="target">{{ "%.1f" | format(decision.room_target if decision.room_target is not none else decision.setpoint) }}<small> °C{% if decision.room_target is not none %} room{% endif %}</small></div>
       <p class="small">{{ decision.label }}</p>
       {% if decision.smart and decision.smart.next_change %}
         {% set at, nxt = decision.smart.next_change %}
@@ -61,6 +61,9 @@
       <p class="muted small">The heater follows its own app or remote. maska-heat only watches.</p>
     {% endif %}
 
+    {% if ctl.mode != "handsoff" and decision.offset is not none %}
+      <p class="muted small">Heater set to {{ "%.1f" | format(decision.setpoint) }} °C — its own sensor reads {{ "%.1f" | format(-decision.offset) if decision.offset < 0 else "%.1f" | format(decision.offset) }} °C {{ "lower" if decision.offset < 0 else "higher" }} than the room right now.</p>
+    {% endif %}
     {% if ctl.mode != "handsoff" %}
       {% if decision.blocked %}
         <p class="warn small">Not sending: {{ decision.blocked }}</p>

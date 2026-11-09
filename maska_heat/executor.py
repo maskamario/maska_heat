@@ -29,6 +29,9 @@ from .settings import Settings
 log = logging.getLogger(__name__)
 
 RUN_SECONDS = 5 * 60
+OFFSET_WINDOW = 20 * 60  # heater-vs-room gap: median over this long
+ROOM_SENSOR_FRESH = 10 * 60
+MAX_OFFSET = 6.0  # a bigger gap is implausible: fall back to the heater's own sensor
 PENDING_SECONDS = 10 * 60  # don't re-send the same value within this time
 FRESH_READING_SECONDS = 15 * 60
 
@@ -40,6 +43,29 @@ class ZoneDecision:
     label: str
     smart: SmartTarget | None = None
     blocked: str | None = None  # why nothing can be sent right now
+    heater_units: bool = False  # setpoint is already a heater value (spike pause), not a room target
+    room_target: float | None = None  # room-sensor control: the room temperature aimed at
+    offset: float | None = None  # room-sensor control: heater sensor − room sensor, °C
+
+
+def heater_offset(db: Database, device: str, sensor_source: str, now: float) -> float | None:
+    """Median gap between the heater's own sensor and the room sensor over the last minutes (None if unknown)."""
+    room = [(r["ts"], r["temp"]) for r in db.readings(sensor_source, int(now - OFFSET_WINDOW - 600), int(now) + 1) if r["temp"] is not None]
+    if not room or now - room[-1][0] > ROOM_SENSOR_FRESH:
+        return None
+    gaps = []
+    for r in db.readings(f"device:{device}", int(now - OFFSET_WINDOW), int(now) + 1):
+        if r["temp"] is None:
+            continue
+        ts, temp = min(room, key=lambda x: abs(x[0] - r["ts"]))
+        if abs(ts - r["ts"]) <= 300:
+            gaps.append(r["temp"] - temp)
+    if len(gaps) < 2:
+        return None
+    gaps.sort()
+    mid = len(gaps) // 2
+    offset = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2
+    return offset if abs(offset) <= MAX_OFFSET else None
 
 
 class Executor:
@@ -73,6 +99,31 @@ class Executor:
 
     def decide(self, zone_key: str, now: float | None = None, snap: Snapshot | None = None) -> ZoneDecision:
         now = now or time.time()
+        d = self._decide(zone_key, now, snap)
+        zone = self.settings.zones[zone_key]
+        if zone.control_by == "room" and d.setpoint is not None and not d.heater_units:
+            self._to_heater_units(zone_key, d, now)
+        return d
+
+    def _to_heater_units(self, zone_key: str, d: ZoneDecision, now: float) -> None:
+        """Turn a room target into the heater's setpoint: shift by how much lower/higher the heater's sensor reads."""
+        zone = self.settings.zones[zone_key]
+        sensor = next(s for s in zone.temp_sources if s.startswith("sensor:"))
+        offset = heater_offset(self.db, zone.device, sensor, now)
+        if offset is None:
+            d.label += " (room sensor unavailable: heater's own sensor)"
+            return
+        caps = self.devices[zone.device].capabilities
+        wanted = d.setpoint + offset
+        latest = self.db.latest_reading(f"device:{zone.device}")
+        current = latest["setpoint"] if latest else None
+        if current is not None and abs(wanted - current) < 0.75 * caps.setpoint_step:
+            setpoint = current  # within the heater's step: keep it, no flip-flopping
+        else:
+            setpoint = caps.clamp(wanted)
+        d.room_target, d.offset, d.setpoint = d.setpoint, offset, setpoint
+
+    def _decide(self, zone_key: str, now: float, snap: Snapshot | None) -> ZoneDecision:
         ctl = self.store.zone(zone_key)
         zone = self.settings.zones[zone_key]
         if self.settings.hot_water and zone_key == self.settings.hot_water.zone:
@@ -108,7 +159,7 @@ class Executor:
             label = f"price spike {paused.label(self.tz)} — paused"
             if view.temp is not None and view.temp < self.settings.spike.safety_min_temp:
                 return ZoneDecision("smart", band.min, f"{label}, but below {self.settings.spike.safety_min_temp:.0f} °C: keeps the minimum", smart=target, blocked=blocked)
-            return ZoneDecision("smart", self.devices[zone.device].capabilities.setpoint_min, label, smart=target, blocked=blocked)
+            return ZoneDecision("smart", self.devices[zone.device].capabilities.setpoint_min, label, smart=target, blocked=blocked, heater_units=True)
         ahead = spike.preheating(self.settings, self.db, zone_key, now)
         if ahead and band.max > target.setpoint:
             return ZoneDecision("smart", band.max, f"pre-heating before the price spike at {datetime.fromtimestamp(ahead.start, self.tz):%H:%M}", smart=target, blocked=blocked)

@@ -62,8 +62,12 @@
     </header>
     <div class="temp">{% if z.temp is not none %}{{ "%.1f" | format(z.temp) }}<small>°C{% if z.temp_kind == "floor" %} floor{% endif %}</small>{% else %}—{% endif %}</div>
     <dl>
-      <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
       {% set d = decisions[z.key] %}
+      {% if d.room_target is not none %}
+      <div><dt>Target</dt><dd>{{ "%.1f" | format(d.room_target) }} °C <span class="muted">(heater {{ "%.0f" | format(z.setpoint) if z.setpoint is not none else "—" }})</span></dd></div>
+      {% else %}
+      <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
+      {% endif %}
       <div><dt>Control</dt><dd>{% if d.mode == "logging" %}{{ mode_name(d.mode) }}{% else %}<a href="/control">{{ mode_name(d.mode) }}</a>{% endif %}{% if d.mode == "smart" %} · {{ d.label }}{% endif %}</dd></div>
       {% if z.level_pct is not none %}<div><dt>Hot water</dt><dd>{{ "%.0f" | format(z.level_pct) }} %</dd></div>{% endif %}
       {% if z.floor_temp is not none and z.temp_kind != "floor" %}<div><dt>Floor</dt><dd>{{ "%.1f" | format(z.floor_temp) }} °C</dd></div>{% endif %}

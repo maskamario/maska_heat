@@ -594,6 +594,15 @@ again". The spike job runs every minute and nudges the executor and the water he
 
 ## 11. Executor & safety
 
+**Room-sensor control** (`control_by: room`, bedrooms since 2026-11-09). The heaters regulate on their own sensor, which
+sits low by the heater and reads 1.4 °C (Mill) to 2.8–3.1 °C (Adax) below the room sensor at 1.5 m — and the gap
+depends on the door: on 9.11 with Madli's door closed the room rose 0.9 °C/h past its 20 °C target to 22 °C while the
+Adax still saw 18.9 °C. So targets (comfort bands, manual, pre-heat, spike safety) are room temperatures, and the
+heater gets `room target + median(heater sensor − room sensor over 20 min)`, clamped to its range and step; changes
+smaller than ¾ of the step are not sent. At equilibrium the heater holds its own sensor at that setpoint, which puts
+the room on target whatever the door does. Without a fresh room sensor (10 min) or with a gap over 6 °C, the target
+goes to the heater as before. The spike pause (heater minimum) is a heater value and is not shifted.
+
 - Every 5 min: apply slot setpoint per zone **only if changed**; read back to confirm.
 - Never power devices on/off. Device found off → skip zone, notify once.
 - Fallbacks: no prices → schedule `preferred`; low-confidence model → conservative; device offline → device

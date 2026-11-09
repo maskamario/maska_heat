@@ -103,6 +103,9 @@ class ZoneSettings(BaseModel):
     temp_sources: list[str] = []
     # Default for the UI: does this zone follow a school timetable (kids' rooms)?
     school: bool = False
+    # "room": targets are room temperatures from the zone's room sensor; the heater's setpoint is shifted by the
+    # current gap between its own sensor and the room sensor. "heater": targets go to the heater as they are.
+    control_by: Literal["heater", "room"] = "heater"
 
 
 class HotWaterSettings(BaseModel):
@@ -168,6 +171,8 @@ class Settings(BaseModel):
                 raise ValueError(f"zone {key!r}: unknown device {zone.device!r}")
             if not zone.temp_sources and zone.device:
                 zone.temp_sources = [f"device:{zone.device}"]
+            if zone.control_by == "room" and not (zone.device and any(s.startswith("sensor:") for s in zone.temp_sources)):
+                raise ValueError(f"zone {key!r}: control_by room needs a device and a sensor in temp_sources")
             for src in zone.temp_sources:
                 kind, _, name = src.partition(":")
                 pool = {"device": self.devices, "sensor": self.sensors}.get(kind)

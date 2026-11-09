@@ -94,11 +94,13 @@ zones:
     name: Madli's bedroom
     device: madli_adax
     temp_sources: [sensor:madli, device:madli_adax]   # room sensor first, heater as fallback
+    control_by: room          # targets are room temperatures; the heater's setpoint follows its sensor's gap
     school: true              # kids' room: school timetable applies (editable in UI)
   matis:
     name: Matis's bedroom
     device: matis_mill
     temp_sources: [sensor:matis, device:matis_mill]
+    control_by: room
     school: true              # kids' room: school timetable applies (editable in UI)
   living:
     name: Living area
