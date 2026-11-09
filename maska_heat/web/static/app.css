@@ -196,3 +196,6 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
   .grid.energy .src { display: none; }
   .grid.energy th, .grid.energy td { padding: 6px 4px; }
 }
+.plan { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 14px; }
+.plan dt { color: var(--muted); }
+.plan dd { margin: 0; font-variant-numeric: tabular-nums; }

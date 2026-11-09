@@ -114,6 +114,17 @@ zones:
     name: Hot water
     device: water_heater
 
+# Price-aware water heater: heats only in the cheapest hours (switch the Hot water zone to Smart in Control)
+hot_water:
+  zone: hot_water
+  hours_per_day: 6            # allowed heating hours per day (a full reheat of 80 l takes ~2.5 h)
+  morning_by: "06:30"         # at least morning_hours of them before this
+  morning_hours: 3
+  evening_from: "12:00"       # and evening_hours between these, for the evening wash
+  evening_by: "19:00"
+  evening_hours: 1
+  boost_below_pct: 30         # outside the windows: boost once below this much hot water
+
 notify:
   enabled: true
   ntfy_server: https://ntfy.sh

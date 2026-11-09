@@ -264,7 +264,7 @@ monitoring, later bathroom drying logic).
 If the Mitsubishi runs in Manual mode (§3.4 level 3), the living-area sensor still lets the app learn, plan, and
 send meaningful setpoint instructions.
 
-### 3.7 Hot water — Thermor Onix Connect (Cozytouch), logging only
+### 3.7 Hot water — Thermor Onix Connect (Cozytouch), price-aware schedule
 80 l electric water heater, 2250 W (`ONIX CONNECT MP 080 S 2250W`, own Wi-Fi module). It is on Atlantic's newer
 Cozytouch platform ("Magellan" API, `apis.groupe-atlantic.com`), **not** on Overkiz — pyoverkiz logs in but the
 Overkiz server answers "no such user". `adapters/cozytouch.py` talks to it directly with httpx, like the current
@@ -293,8 +293,20 @@ also at expensive daytime hours). A saved but inactive schedule allows 00:00–0
 Daily consumption (`/magellan/setups/<id>/consumptions?periodicity=daily|monthly`) only gives **hot water litres**
 for the current day, no electricity — energy is estimated from the heating state instead.
 
-Read-only for now. Later: a planned price-aware schedule — write the day's cheapest slots (§10) into the time-slot
-schedule with Heat_Schedule, keeping enough hot water (state of charge) for the morning and evening use the log shows.
+**Price-aware schedule** (`hotwater.py`, zone mode Smart; Hands-off restores the boiler's own mode and schedule).
+Writes go to `POST /magellan/executions/writecapability` (`capabilityId`, `deviceId`, value as text; 201 → execution
+id, polled at `/magellan/executions/<id>` until state 3). Every 10 min, when the zone is Smart:
+1. On taking control, remember the operating range and all 7 day schedules (restored on Hands-off).
+2. For today and tomorrow (once its prices are complete, ~14:00) write that weekday's slots: `hours_per_day` (6) of
+   the cheapest hours, of which ≥ 3 before 06:30 (tank full for morning showers) and ≥ 1 between 12:00 and 19:00
+   (top-up for the evening wash); merged into ≤ 3 windows (the boiler's limit), filling the cheapest gaps.
+3. Operating range → Heat_Schedule. The boiler then follows the schedule on its own — if the app, the Pi or the
+   cloud is down it keeps the last schedule, so hot water never depends on the app.
+4. Safety net: hot water < 30 % outside the windows → one boost (capability 165) and an ntfy message, at most every 3 h.
+
+On the prices of 28.10–9.11 the planned hours averaged ~30 % below the day's average price ("heats any time") and
+~15 % below the saved night schedule. Settings in `config.yaml → hot_water`; narrow `hours_per_day` once the log
+shows the real daily need.
 
 ## 4. Electricity cost
 

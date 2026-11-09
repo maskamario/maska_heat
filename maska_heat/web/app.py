@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -22,7 +22,8 @@ from ..control import COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, Contro
 from ..dashboard import as_dict, history, upcoming_prices, zone_views
 from ..db import Database
 from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
-from ..executor import Executor, describe_mode
+from ..executor import Executor, describe_mode, zone_modes
+from ..hotwater import HotWaterController, describe as describe_windows, planned as hot_water_plan
 from ..notify import Notifier
 from ..schedule import MODE_LABEL
 from ..settings import Settings
@@ -71,11 +72,20 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         kid_zones = [k for k, z in settings.zones.items() if z.school]
         app.state.store = ControlStore(app.state.db, kid_zones)
         app.state.executor = Executor(settings, app.state.db, app.state.store, app.state.collector.devices)
+        app.state.hot_water = (
+            HotWaterController(settings, app.state.db, app.state.store, app.state.collector.devices, app.state.notifier)
+            if settings.hot_water
+            else None
+        )
         if start_jobs:
             app.state.collector.start()
             app.state.executor.start()
+            if app.state.hot_water:
+                app.state.hot_water.start()
         yield
         await app.state.executor.stop()
+        if app.state.hot_water:
+            await app.state.hot_water.stop()
         await app.state.collector.stop()
         await app.state.notifier.aclose()
         if own_db:
@@ -93,8 +103,15 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     def _executor(request: Request) -> Executor:
         return request.app.state.executor
 
+    def _is_hot_water(zone_key: str | None) -> bool:
+        return bool(settings.hot_water) and zone_key == settings.hot_water.zone
+
     def _apply(request: Request, zone_key: str | None = None) -> None:
-        if start_jobs:
+        if not start_jobs:
+            return
+        if _is_hot_water(zone_key):
+            request.app.state.hot_water.trigger()
+        else:
             _executor(request).trigger(zone_key)
 
     def decisions(request: Request) -> dict:
@@ -191,6 +208,18 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "decision": decision,
             "controllable": bool(dev) and dev in request.app.state.collector.devices and decision.mode != "logging",
             "logging_only": decision.mode == "logging",
+            "modes": zone_modes(settings, zone_key),
+            "hot_water": hot_water_card(request) if _is_hot_water(zone_key) else None,
+        }
+
+    def hot_water_card(request: Request) -> dict:
+        today = datetime.now(tz).date()
+        tomorrow = hot_water_plan(settings, _db(request), today + timedelta(days=1))
+        return {
+            "today": describe_windows(hot_water_plan(settings, _db(request), today) or []),
+            "tomorrow": describe_windows(tomorrow) if tomorrow is not None else None,
+            "hours": settings.hot_water.hours_per_day,
+            "boost_below": settings.hot_water.boost_below_pct,
         }
 
     def control_context(request: Request, error: str | None = None) -> dict:
@@ -213,7 +242,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             raise HTTPException(404, "unknown zone")
 
     def _set_mode(request: Request, zone_key: str, mode: str) -> None:
-        if mode not in ("handsoff", "manual", "smart"):
+        if mode not in zone_modes(settings, zone_key):
             raise HTTPException(400, "unknown mode")
         store = _store(request)
         ctl = store.zone(zone_key)
@@ -234,7 +263,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     @app.post("/control/all")
     async def control_all(request: Request, mode: str = Form(...)):
         for k in settings.zones:
-            _set_mode(request, k, mode)
+            if not _is_hot_water(k):  # "all rooms": the water heater is switched on its own card
+                _set_mode(request, k, mode)
         _apply(request)
         return Response(headers={"HX-Refresh": "true"})
 

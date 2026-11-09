@@ -4,13 +4,33 @@
     <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C{% if view.temp_kind == "floor" %} floor{% endif %} now{% endif %}</span>
   </header>
 
-  {% if logging_only %}
+  {% if hot_water %}
+    <div class="seg" role="group" aria-label="Control mode for {{ zone.name }}">
+      {% for m in modes %}
+        <button type="button"
+                hx-post="/control/{{ key }}/mode" hx-vals='{"mode": "{{ m }}"}'
+                hx-target="#ctl-{{ key }}" hx-swap="outerHTML"
+                class="{% if ctl.mode == m %}on{% endif %}"
+                aria-pressed="{{ 'true' if ctl.mode == m else 'false' }}">{{ mode_name(m) }}</button>
+      {% endfor %}
+    </div>
+    {% if ctl.mode == "smart" %}
+      <p class="small">Heats only in the {{ hot_water.hours }} cheapest hours of the day — enough before the morning and a top-up before the evening.</p>
+      <dl class="plan">
+        <div><dt>Today</dt><dd>{{ hot_water.today }}</dd></div>
+        <div><dt>Tomorrow</dt><dd>{{ hot_water.tomorrow or "after tomorrow's prices (~14:00)" }}</dd></div>
+      </dl>
+      <p class="muted small">Below {{ "%.0f" | format(hot_water.boost_below) }} % hot water outside these hours it boosts once and notifies you.{% if view.level_pct is not none %} Now {{ "%.0f" | format(view.level_pct) }} %.{% endif %}</p>
+    {% else %}
+      <p class="muted small">The water heater runs on its own settings. Smart lets it heat only in the cheapest hours; it keeps that schedule even if maska-heat is down.</p>
+    {% endif %}
+  {% elif logging_only %}
     <p class="muted">Logging only — maska-heat records this heater but does not control it yet.</p>
   {% elif not controllable %}
     <p class="muted">Heater not set up — nothing to control.</p>
   {% else %}
     <div class="seg" role="group" aria-label="Control mode for {{ zone.name }}">
-      {% for m in ["handsoff", "manual", "smart"] %}
+      {% for m in modes %}
         <button type="button"
                 hx-post="/control/{{ key }}/mode" hx-vals='{"mode": "{{ m }}"}'
                 hx-target="#ctl-{{ key }}" hx-swap="outerHTML"

@@ -105,6 +105,19 @@ class ZoneSettings(BaseModel):
     school: bool = False
 
 
+class HotWaterSettings(BaseModel):
+    """Price-aware water heater (Cozytouch): heats only in the day's cheapest hours (maska_heat/hotwater.py)."""
+
+    zone: str = "hot_water"
+    hours_per_day: int = 6
+    morning_by: time = time(6, 30)  # tank full for the morning: at least morning_hours before this
+    morning_hours: int = 3
+    evening_from: time = time(12, 0)  # top-up for the evening: at least evening_hours in this span
+    evening_by: time = time(19, 0)
+    evening_hours: int = 1
+    boost_below_pct: float = 30.0  # outside the windows, boost once when hot water drops below this
+
+
 class NotifySettings(BaseModel):
     enabled: bool = True
     ntfy_server: str = "https://ntfy.sh"
@@ -128,6 +141,7 @@ class Settings(BaseModel):
     doors: dict[str, DoorSettings] = {}
     outdoor_sensor: str | None = None
     zones: dict[str, ZoneSettings] = {}
+    hot_water: HotWaterSettings | None = None
     notify: NotifySettings = NotifySettings()
     web: WebSettings = WebSettings()
     database: str = "data/maska_heat.db"
@@ -152,6 +166,12 @@ class Settings(BaseModel):
         )
         if uses_hub and self.dirigera is None:
             raise ValueError("dirigera sensors or doors are configured but the dirigera: host is missing")
+        if self.hot_water:
+            zone = self.zones.get(self.hot_water.zone)
+            if zone is None or not zone.device or self.devices[zone.device].type != "cozytouch":
+                raise ValueError(f"hot_water: zone {self.hot_water.zone!r} must be a zone with a cozytouch water heater")
+            if not 1 <= self.hot_water.hours_per_day <= 24:
+                raise ValueError("hot_water: hours_per_day must be 1–24")
         if self.outdoor_sensor and self.outdoor_sensor not in self.sensors:
             raise ValueError(f"outdoor_sensor: unknown sensor {self.outdoor_sensor!r}")
         return self

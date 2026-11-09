@@ -240,6 +240,23 @@ async def probe_cozytouch(cfg: dict, secrets: dict, args) -> None:
     print(f"  hot water : {s.level_pct} % ({s.raw['v40_litres']} l of 40 °C water)")
     caps = s.raw["capabilities"]
     print("  capabilities: " + " ".join(f"{k}={v!r}" for k, v in sorted(caps.items()) if len(str(v)) < 30))
+    from .adapters.cozytouch import CAP_SCHEDULE, parse_schedule
+
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for wd, cap in CAP_SCHEDULE.items():
+        windows = parse_schedule(caps.get(cap))
+        print(f"  schedule {days[wd]}: " + (", ".join(f"{a // 60:02d}:{a % 60:02d}-{b // 60:02d}:{b % 60:02d}" for a, b in windows) or "none"))
+    if args.write_test is not None:
+        wd = args.write_test
+        cz = CozytouchWaterHeaterAdapter(email, password, device_name=dev.get("device_name"))
+        try:
+            await cz.read()
+            same = parse_schedule(caps.get(CAP_SCHEDULE[wd]))
+            await cz.set_day_schedule(wd, same)  # the same windows again: changes nothing
+            after = parse_schedule((await cz.read()).raw["capabilities"].get(CAP_SCHEDULE[wd]))
+        finally:
+            await cz.aclose()
+        print(f"  write test {days[wd]}: wrote {same} → read back {after} — {'OK' if after == same else 'MISMATCH'}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seconds", type=float, default=20)
     dg = sub.add_parser("dirigera")
     dg.add_argument("--host", help="override dirigera host from config.yaml")
-    sub.add_parser("cozytouch")
+    cz = sub.add_parser("cozytouch")
+    cz.add_argument("--write-test", type=int, metavar="WEEKDAY", help="rewrite that weekday's schedule (0=Mon) unchanged")
     t = sub.add_parser("tuya")
     t.add_argument("name", nargs="?", help="device name in config.yaml (default: the first tuya_thermostat)")
     t.add_argument("--host", help="override host from config.yaml")

@@ -74,6 +74,8 @@ class Executor:
         now = now or time.time()
         ctl = self.store.zone(zone_key)
         zone = self.settings.zones[zone_key]
+        if self.settings.hot_water and zone_key == self.settings.hot_water.zone:
+            return self._hot_water_decision(ctl.mode, now)
         if zone.device in self.devices and not self.devices[zone.device].capabilities.writable:
             return ZoneDecision("logging", None, "Logging only — the app does not control this heater")
         if ctl.mode == "handsoff":
@@ -99,6 +101,15 @@ class Executor:
             preheating_for=self._preheating_for.get(zone_key),
         )
         return ZoneDecision("smart", target.setpoint, target.reason, smart=target, blocked=blocked)
+
+    def _hot_water_decision(self, mode: str, now: float) -> ZoneDecision:
+        from .hotwater import describe, planned
+
+        if mode != "smart":
+            return ZoneDecision("handsoff", None, "Hands-off — heats whenever it wants")
+        windows = planned(self.settings, self.db, datetime.fromtimestamp(now, self.tz).date())
+        label = f"heats {describe(windows)}" if windows is not None else "waiting for today's prices"
+        return ZoneDecision("smart", None, label)
 
     # applying -----------------------------------------------------------------
 
@@ -231,4 +242,11 @@ def describe_mode(mode: str) -> str:
     return {"handsoff": "Hands-off", "manual": "Manual", "smart": "Smart", "logging": "Logging only"}[mode]
 
 
-__all__ = ["Executor", "ZoneDecision", "describe_mode", "MODE_LABEL"]
+def zone_modes(settings: Settings, zone_key: str) -> list[str]:
+    """Modes a zone offers in the UI: the water heater has no manual temperature."""
+    if settings.hot_water and zone_key == settings.hot_water.zone:
+        return ["handsoff", "smart"]
+    return ["handsoff", "manual", "smart"]
+
+
+__all__ = ["Executor", "ZoneDecision", "describe_mode", "zone_modes", "MODE_LABEL"]

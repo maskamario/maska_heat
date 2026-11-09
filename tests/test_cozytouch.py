@@ -117,7 +117,7 @@ async def test_offline_heater_and_never_writes():
     with pytest.raises(DeviceError, match="not connected"):
         await cz.read()
     assert not cz.capabilities.writable
-    with pytest.raises(DeviceError, match="logged only"):
+    with pytest.raises(DeviceError, match="not controlled"):
         await cz.set_setpoint(60)
 
 

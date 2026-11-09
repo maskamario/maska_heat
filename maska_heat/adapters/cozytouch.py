@@ -32,6 +32,33 @@ SETPOINT_MODES = {0: "Constant", 2: "Eco/comfort schedule", 3: "Automatic", 4: "
 OPERATING_RANGES = {0: "heats any time", 1: "heats on schedule", 2: "heats off-peak", 3: "self-consumption"}
 SERVICE_ON = {2, 3}  # On, OnReduced (0 Off, 1 OffAntifrost)
 
+# Writable: when it may heat, the weekly time slots, boost
+RANGE_ANY_TIME, RANGE_SCHEDULE = 0, 1
+CAP_BOOST = 165
+CAP_SCHEDULE = {0: 245, 1: 246, 2: 247, 3: 248, 4: 249, 5: 250, 6: 251}  # Monday … Sunday
+MAX_WINDOWS = 3
+EXECUTION_POLLS = 10
+
+
+def schedule_value(windows: list[tuple[int, int]]) -> str:
+    """Up to 3 heating windows of a day, (start, end) in minutes since midnight, as Cozytouch expects them."""
+    if len(windows) > MAX_WINDOWS:
+        raise ValueError(f"at most {MAX_WINDOWS} windows per day")
+    for start, end in windows:
+        if not (0 <= start < end <= 1440) or start % 15 or end % 15:
+            raise ValueError(f"bad window {start}-{end}")
+    padded = [list(w) for w in sorted(windows)] + [[0, 0]] * (MAX_WINDOWS - len(windows))
+    return "[" + ",".join(f"[{a},{b}]" for a, b in padded) + "]"
+
+
+def parse_schedule(value: str | None) -> list[tuple[int, int]]:
+    import json
+
+    try:
+        return [(a, b) for a, b in json.loads(value or "[]") if b > a]
+    except (ValueError, TypeError):
+        return []
+
 
 def _num(caps: dict[int, str], cap: int) -> float | None:
     try:
@@ -89,6 +116,7 @@ class CozytouchWaterHeaterAdapter:
         self._client = client or httpx.AsyncClient(base_url=API_URL, timeout=TIMEOUT_SECONDS)
         self._token: str | None = None
         self._token_until = 0.0
+        self.device_id: int | None = None
 
     async def _login(self) -> None:
         try:
@@ -143,12 +171,54 @@ class CozytouchWaterHeaterAdapter:
         state = parse_water_heater(caps)
         state.online = bool(dev.get("isAvailable", True))
         state.raw["name"] = dev.get("name")
+        self.device_id = dev.get("deviceId")
         if not state.online:
             raise DeviceError(f"Cozytouch: {dev.get('name')} is not connected")
         return state
 
     async def set_setpoint(self, temp_c: float) -> None:
-        raise DeviceError("the water heater is logged only — the app does not control it yet")
+        raise DeviceError("the water heater's temperature is not controlled — only when it may heat")
+
+    # writes (price-aware schedule) ------------------------------------------------------------------
+
+    async def write(self, capability: int, value: str) -> None:
+        """Write one capability and wait until the boiler has applied it."""
+        import asyncio
+
+        if self.device_id is None:
+            await self.read()
+        if not self._token or time.time() >= self._token_until:
+            await self._login()
+        try:
+            r = await self._client.post(
+                "/magellan/executions/writecapability",
+                headers={"Authorization": f"Bearer {self._token}"},
+                json={"capabilityId": capability, "deviceId": self.device_id, "value": value},
+            )
+        except httpx.HTTPError as e:
+            raise DeviceError(f"Cozytouch write {capability}: {type(e).__name__}") from e
+        if r.status_code == 429:
+            raise DeviceError(f"Cozytouch write {capability}: rate limited")
+        if r.status_code != 201:
+            raise DeviceError(f"Cozytouch write {capability}: HTTP {r.status_code}")
+        execution = r.json()
+        for _ in range(EXECUTION_POLLS):
+            await asyncio.sleep(1)
+            state = (await self._get(f"/magellan/executions/{execution}")).get("state")
+            if state == 3:
+                return
+            if state not in (1, 2):
+                raise DeviceError(f"Cozytouch write {capability}: execution ended in state {state}")
+        raise DeviceError(f"Cozytouch write {capability}: not applied after {EXECUTION_POLLS} s")
+
+    async def set_operating_range(self, mode: int) -> None:
+        await self.write(CAP_RANGE, str(mode))
+
+    async def set_day_schedule(self, weekday: int, windows: list[tuple[int, int]]) -> None:
+        await self.write(CAP_SCHEDULE[weekday], schedule_value(windows))
+
+    async def boost(self) -> None:
+        await self.write(CAP_BOOST, "1")
 
     async def aclose(self) -> None:
         await self._client.aclose()
