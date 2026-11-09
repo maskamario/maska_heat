@@ -182,3 +182,17 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
   nav a { margin-left: 10px; font-size: 14px; }
   .form-row > label { flex: 1 1 100%; }
 }
+
+/* energy page */
+.table-wrap { overflow-x: auto; }
+.grid.energy { width: 100%; font-variant-numeric: tabular-nums; }
+.grid .num { text-align: right; }
+.grid tfoot th { border-bottom: 0; }
+.small-cell { font-size: 13px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: baseline; }
+.small-seg { margin: 0; }
+.small-seg button { padding: 4px 12px; }
+@media (max-width: 600px) {
+  .grid.energy .src { display: none; }
+  .grid.energy th, .grid.energy td { padding: 6px 4px; }
+}

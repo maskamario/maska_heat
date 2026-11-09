@@ -9,6 +9,11 @@
     {% endif %}
   </div>
   <div class="stat">
+    <div class="label">Heating today</div>
+    <div class="value">{{ "%.1f" | format(energy_today.kwh) }}<small> kWh</small> · {{ "%.2f" | format(energy_today.cost) }}<small> €</small></div>
+    <div class="sub"><a href="/energy">{% if energy_today.avg_price is not none %}{{ energy_today.avg_price | cents }} c/kWh on average · {% endif %}by room</a></div>
+  </div>
+  <div class="stat">
     <div class="label">Outdoor</div>
     <div class="value">{% if outdoor %}{{ "%.1f" | format(outdoor.temp) }}<small> °C</small>{% else %}—{% endif %}</div>
     <div class="sub">

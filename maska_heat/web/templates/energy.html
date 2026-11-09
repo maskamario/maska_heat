@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Energy · Maska Heat{% endblock %}
+{% block content %}
+<form class="toolbar" method="get" action="/energy">
+  <label>Period
+    <select name="period" onchange="this.form.submit()">
+      {% for key, label in periods.items() %}
+        <option value="{{ key }}" {% if key == e.period %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <span class="muted small">{{ e.start.strftime("%a %d.%m %H:%M") }} – {{ e.end.strftime("%a %d.%m %H:%M") }}</span>
+</form>
+
+<section class="strip">
+  <div class="stat">
+    <div class="label">Heating electricity</div>
+    <div class="value">{{ "%.1f" | format(e.kwh) }}<small> kWh</small></div>
+    <div class="sub">{{ e.label | lower }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Cost</div>
+    <div class="value">{{ "%.2f" | format(e.cost) }}<small> €</small></div>
+    <div class="sub">incl. network, fees &amp; VAT{% if e.unpriced_kwh > 0.05 %} · {{ "%.1f" | format(e.unpriced_kwh) }} kWh without price{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Average price paid</div>
+    <div class="value">{{ e.avg_price | cents }}<small> c/kWh</small></div>
+    <div class="sub">
+      {% if e.avg_price is not none and e.period_price is not none %}
+        period average {{ e.period_price | cents }} c ·
+        {% set diff = (e.avg_price - e.period_price) / e.period_price * 100 %}
+        <span class="{{ 'bad' if diff > 2 else '' }}">{{ "%+.0f" | format(diff) }} %</span>
+      {% else %}—{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <header class="card-head"><h2>By room</h2><span class="muted">wood stoves not included</span></header>
+  <div class="table-wrap">
+  <table class="grid energy">
+    <thead><tr><th>Room / device</th><th class="num">kWh</th><th class="num">€</th><th class="num">Share</th><th class="num">c/kWh</th><th class="src">Source</th></tr></thead>
+    <tbody>
+      {% for d in e.devices %}
+      <tr>
+        <td><span class="swatch" data-zone="{{ d.zone }}"></span>{{ d.name }}</td>
+        {% if d.has_data %}
+          <td class="num">{{ "%.2f" | format(d.kwh) }}</td>
+          <td class="num">{{ "%.2f" | format(d.cost) }}</td>
+          <td class="num">{% if e.kwh > 0 %}{{ "%.0f" | format(d.kwh / e.kwh * 100) }} %{% else %}—{% endif %}</td>
+          <td class="num">{{ d.avg_price | cents }}</td>
+        {% else %}
+          <td class="num muted" colspan="4">no data</td>
+        {% endif %}
+        <td class="muted small-cell src">{{ method_label[d.method] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th>Total</th><th class="num">{{ "%.2f" | format(e.kwh) }}</th><th class="num">{{ "%.2f" | format(e.cost) }}</th><th></th><th class="num">{{ e.avg_price | cents }}</th><th class="src"></th></tr></tfoot>
+  </table>
+  </div>
+</section>
+
+<section class="card">
+  <header class="card-head">
+    <h2>{{ "Per hour" if e.period in ("today", "yesterday") else "Per day" }}</h2>
+    <div class="seg small-seg" role="group" aria-label="Chart unit">
+      <button type="button" class="on" data-unit="kwh" aria-pressed="true">kWh</button>
+      <button type="button" data-unit="cost" aria-pressed="false">€</button>
+    </div>
+  </header>
+  <div class="chart tall"><canvas id="energy-chart"></canvas></div>
+</section>
+<script type="application/json" id="energy-data">{{ energy_json | tojson }}</script>
+{% endblock %}

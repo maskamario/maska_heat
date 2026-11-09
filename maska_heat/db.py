@@ -192,6 +192,9 @@ class Database:
         rows = self._all("SELECT * FROM readings WHERE source=? ORDER BY ts DESC LIMIT 1", (source,))
         return rows[0] if rows else None
 
+    def count_readings(self, source: str, since: int, until: int) -> int:
+        return self._all("SELECT COUNT(*) AS n FROM readings WHERE source=? AND ts>=? AND ts<?", (source, since, until))[0]["n"]
+
     def readings(self, source: str, since: int, until: int | None = None) -> list[sqlite3.Row]:
         return self._all(
             "SELECT * FROM readings WHERE source=? AND ts>=? AND ts<? ORDER BY ts",

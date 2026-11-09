@@ -21,6 +21,7 @@ from ..collector import Collector
 from ..control import COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, ControlStore, DateRange, HouseSchedule, KidSchool, SchoolDay
 from ..dashboard import as_dict, history, upcoming_prices, zone_views
 from ..db import Database
+from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
 from ..executor import Executor, describe_mode
 from ..notify import Notifier
 from ..schedule import MODE_LABEL
@@ -115,6 +116,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             outdoor = {"temp": weather["temp"], "source": "forecast"}
         return {
             "request": request,
+            "energy_today": energy_summary(settings, db, "today", now),
             "zones": zone_views(settings, db, now),
             "price_now": next((p for p in prices if p.is_now), None),
             "prices": prices,
@@ -410,6 +412,23 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         if zone not in settings.zones:
             raise HTTPException(404, "unknown zone")
         return JSONResponse(history(settings, _db(request), zone, min(max(hours, 1), 24 * 31), time.time()))
+
+    @app.get("/energy", response_class=HTMLResponse)
+    async def energy_page(request: Request, period: str = "today"):
+        if period not in PERIODS:
+            period = "today"
+        e = energy_summary(settings, _db(request), period, time.time())
+        return templates.TemplateResponse(
+            request,
+            "energy.html",
+            {"request": request, "e": e, "periods": PERIODS, "method_label": METHOD_LABEL, "energy_json": energy_json(e)},
+        )
+
+    @app.get("/api/energy")
+    async def api_energy(request: Request, period: str = "today"):
+        if period not in PERIODS:
+            raise HTTPException(400, "unknown period")
+        return JSONResponse(energy_json(energy_summary(settings, _db(request), period, time.time())))
 
     @app.get("/healthz")
     async def healthz(request: Request):

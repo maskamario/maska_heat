@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 
 from .config import ROOT, load_config
 
-DEFAULT_POLL_SECONDS = {"mill_local": 60, "adax_cloud": 300, "melcloud": 300, "tuya_thermostat": 60, "cozytouch": 300}
+DEFAULT_POLL_SECONDS = {"mill_local": 60, "adax_cloud": 300, "melcloud": 300, "tuya_thermostat": 60, "cozytouch": 120}
 
 
 class Location(BaseModel):

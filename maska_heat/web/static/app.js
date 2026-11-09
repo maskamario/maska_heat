@@ -96,7 +96,40 @@
     });
   }
 
+  const ZONE_COLORS = ["--accent", "--cool", "--day", "--night", "--muted", "--text"];
+
+  function renderEnergy(data) {
+    const zones = data.devices.filter((d) => d.has_data).map((d) => d.zone);  // table order (JSON keys come sorted)
+    const color = (zone) => css(ZONE_COLORS[data.devices.findIndex((d) => d.zone === zone) % ZONE_COLORS.length]);
+    document.querySelectorAll(".swatch[data-zone]").forEach((el) => { el.style.background = color(el.dataset.zone); });
+    const names = Object.fromEntries(data.devices.map((d) => [d.zone, d.name]));
+    const label = (ms) => data.by_hour ? hhmm(ms) : new Date(ms).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "numeric" });
+    let chart;
+    function draw(unit) {
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById("energy-chart"), {
+        type: "bar",
+        data: {
+          labels: data.buckets.map((b) => label(b.ts * 1000)),
+          datasets: zones.map((z) => ({ label: names[z], data: data.buckets.map((b) => b[unit][z]), backgroundColor: color(z), borderRadius: 2, stack: "s" })),
+        },
+        options: {
+          ...baseOptions(),
+          plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${unit === "kwh" ? i.raw.toFixed(2) + " kWh" : i.raw.toFixed(2) + " €"}` } } },
+          scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, title: { display: true, text: unit === "kwh" ? "kWh" : "€" } } },
+        },
+      });
+    }
+    draw("kwh");
+    document.querySelectorAll("[data-unit]").forEach((btn) => btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-unit]").forEach((b) => { b.classList.toggle("on", b === btn); b.setAttribute("aria-pressed", b === btn); });
+      draw(btn.dataset.unit);
+    }));
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
+    const energyData = document.getElementById("energy-data");
+    if (energyData) renderEnergy(JSON.parse(energyData.textContent));
     const priceData = document.getElementById("price-data");
     if (priceData) renderPrices(document.getElementById("price-chart"), JSON.parse(priceData.textContent));
     if (window.HISTORY) renderHistory(window.HISTORY);

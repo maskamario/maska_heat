@@ -270,7 +270,7 @@ Cozytouch platform ("Magellan" API, `apis.groupe-atlantic.com`), **not** on Over
 Overkiz server answers "no such user". `adapters/cozytouch.py` talks to it directly with httpx, like the current
 Cozytouch app: `POST /users/token` (password grant, username `GA-PRIVATEPERSON/<email>`, the app's public client
 id; token valid 8 h) → `GET /magellan/cozytouch/setupviewv2` (setup with devices and their capability values;
-the setup also holds the home address, which is never stored). Polled every 5 min; the account's `rateLimit` is 30.
+the setup also holds the home address, which is never stored). Polled every 2 min (energy estimate from the heating state); the account's `rateLimit` is 30.
 Check with `python -m maska_heat.probe cozytouch`.
 
 Capabilities used (names from `GET /magellan/productmodels/capabilities`):
@@ -430,6 +430,22 @@ Precedence: Hold > Boost > Away > Home-today > Flex > Plan > Schedule fallback. 
 | `events` | ts, level, source, message |
 
 Polling: local devices 1–2 min, cloud devices 5 min. Weather + price hourly.
+
+### 6.1 Heating electricity use and cost (`energy.py`, page *Energy*)
+Per device, use is built per clock hour from the best source it has, then each hour is priced at its full cost
+(spot + network day/night + fees + VAT, §4) — so the cost and the **average price paid** show *when* it heated;
+compared with the period's plain average price it shows whether heating runs at cheap or expensive hours.
+
+| Device | Source | Accuracy |
+|---|---|---|
+| Mill | measured power every minute, held until the next reading (max 3 poll intervals) | good |
+| Mitsubishi | MELCloud report: hourly profile scaled to the daily total; days without a profile spread evenly | good per day |
+| Adax | cloud counter of energy in the current hour (`energyWh`, resets hourly); the hour's last value extended to the full hour | ~1.5 % low vs Adax's daily log |
+| Floor (bathroom 2) | heating on/off every minute × 420 W | good |
+| Water heater | heating on/off every 2 min × 2250 W | fair (short runs between readings can be missed) |
+
+Periods: today, yesterday, last 7 days, this month; per hour or per day, kWh or €. The dashboard shows today's
+total. Wood stoves are not included. Hours without a known price are counted in kWh and reported as unpriced.
 
 ---
 
