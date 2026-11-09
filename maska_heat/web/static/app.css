@@ -199,3 +199,5 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 .plan { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 14px; }
 .plan dt { color: var(--muted); }
 .plan dd { margin: 0; font-variant-numeric: tabular-nums; }
+.notice.spike { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.notice.spike button { margin-left: auto; }

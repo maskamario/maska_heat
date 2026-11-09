@@ -35,6 +35,10 @@ class FakeTuya:
     def status(self):
         return self.result
 
+    def set_value(self, dp, value):
+        self.written = (dp, value)
+        return {"dps": {str(dp): value}}
+
     def close(self):
         self.closed = True
 
@@ -73,11 +77,14 @@ async def test_read_and_errors():
         await tuya(None).read()
 
 
-async def test_never_writes():
+async def test_setpoint_write_only_for_spikes():
     t = tuya({"dps": DPS})
-    assert not t.capabilities.writable
-    with pytest.raises(DeviceError, match="logged only"):
-        await t.set_setpoint(22)
+    assert not t.capabilities.writable  # the executor never controls it; only the price-spike pause writes
+    await t.set_setpoint(4)
+    assert t._device.written == (3, 50)  # clamped to 5.0 °C, in tenths
+    t._device.set_value = lambda dp, v: {"Error": "Network Error: Unable to Connect"}
+    with pytest.raises(DeviceError, match="Unable to Connect"):
+        await t.set_setpoint(27)
     await t.aclose()
     assert t._device.closed
 

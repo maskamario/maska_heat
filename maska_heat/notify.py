@@ -33,7 +33,9 @@ class Notifier:
         start, end = self.cfg.quiet_start, self.cfg.quiet_end
         return (start <= t or t < end) if start > end else (start <= t < end)
 
-    async def send(self, kind: str, title: str, message: str, priority: str = "default", tags: str = "") -> bool:
+    async def send(
+        self, kind: str, title: str, message: str, priority: str = "default", tags: str = "", actions: list[dict] | None = None
+    ) -> bool:
         """Send a notification. Quiet hours hold back everything below 'high'."""
         if not self.available:
             log.info("notification not sent (ntfy not configured): %s — %s", title, message)
@@ -44,6 +46,8 @@ class Notifier:
         payload = {"topic": self.topic, "title": title, "message": message, "priority": PRIORITY[priority]}
         if tags:
             payload["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+        if actions:  # buttons in the notification (ntfy action buttons)
+            payload["actions"] = actions
         try:
             r = await self._client.post(self.cfg.ntfy_server.rstrip("/"), json=payload)
             r.raise_for_status()

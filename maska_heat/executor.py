@@ -23,6 +23,7 @@ from .control import ControlStore, ZoneControl
 from .dashboard import zone_views
 from .db import Database
 from .schedule import MODE_LABEL, Snapshot, SmartTarget, smart_target
+from . import spike
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -96,10 +97,21 @@ class Executor:
 
         view = next(v for v in zone_views(self.settings, self.db, now) if v.key == zone_key)
         kind = self.devices[zone.device].capabilities.kind
+        snap = snap or self.snapshot()
         target = smart_target(
-            zone_key, datetime.fromtimestamp(now, self.tz), view.temp, kind, snap or self.snapshot(),
+            zone_key, datetime.fromtimestamp(now, self.tz), view.temp, kind, snap,
             preheating_for=self._preheating_for.get(zone_key),
         )
+        band = snap.comfort.band(target.mode)
+        paused = spike.pausing(self.settings, self.db, zone_key, now)
+        if paused:
+            label = f"price spike {paused.label(self.tz)} — paused"
+            if view.temp is not None and view.temp < self.settings.spike.safety_min_temp:
+                return ZoneDecision("smart", band.min, f"{label}, but below {self.settings.spike.safety_min_temp:.0f} °C: keeps the minimum", smart=target, blocked=blocked)
+            return ZoneDecision("smart", self.devices[zone.device].capabilities.setpoint_min, label, smart=target, blocked=blocked)
+        ahead = spike.preheating(self.settings, self.db, zone_key, now)
+        if ahead and band.max > target.setpoint:
+            return ZoneDecision("smart", band.max, f"pre-heating before the price spike at {datetime.fromtimestamp(ahead.start, self.tz):%H:%M}", smart=target, blocked=blocked)
         return ZoneDecision("smart", target.setpoint, target.reason, smart=target, blocked=blocked)
 
     def _hot_water_decision(self, mode: str, now: float) -> ZoneDecision:

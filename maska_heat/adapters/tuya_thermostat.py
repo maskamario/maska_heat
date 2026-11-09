@@ -77,7 +77,13 @@ class TuyaThermostatAdapter:
         return state
 
     async def set_setpoint(self, temp_c: float) -> None:
-        raise DeviceError("the floor thermostat is logged only — the app does not control it yet")
+        """Write the setpoint (DP 3). Only the price-spike pause uses this — the zone is otherwise logged only
+        (capabilities.writable is False, so the executor never controls it)."""
+        value = int(round(self.capabilities.clamp(temp_c) * 10))
+        async with self._lock:
+            result = await asyncio.to_thread(self._device.set_value, int(DP_SETPOINT), value)
+        if isinstance(result, dict) and "Error" in result:
+            raise DeviceError(f"Tuya {self.host}: {result['Error']}")
 
     async def aclose(self) -> None:
         close = getattr(self._device, "close", None)

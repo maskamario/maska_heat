@@ -158,6 +158,11 @@ def planned(settings, db, day: date) -> list[tuple[int, int]] | None:
     prices = day_prices(hour_prices(settings, db, start, start + 25 * 3600), day, tz)
     if len(prices) < MIN_HOURS_FOR_PLAN:
         return None
+    if settings.spike and settings.hot_water.zone in settings.spike.zones:
+        from .spike import spike_hours
+
+        skip = spike_hours(settings, db, day)
+        prices = {m: p for m, p in prices.items() if m not in skip}  # never heat in a price spike
     return plan_day(prices, rules_from(settings.hot_water))
 
 
@@ -242,8 +247,11 @@ class HotWaterController:
             self._event("set to heat on schedule")
 
         level = current.level_pct
+        from .spike import pausing
+
         if (
-            level is not None
+            not pausing(self.settings, self.db, self.zone, now)  # no boost in a price spike
+            and level is not None
             and level < self.cfg.boost_below_pct
             and not (today_windows and in_window(today_windows, local))
             and now - state.get("last_boost", 0) > BOOST_COOLDOWN

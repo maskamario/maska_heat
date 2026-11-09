@@ -23,6 +23,18 @@
   </div>
 </section>
 
+{% if spike %}
+<p class="notice {{ 'ok-bg' if spike.overridden else 'bad-bg' }} spike">
+  {% if spike.overridden %}
+    Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — <strong>heating normally</strong> (overridden).
+    <button type="button" hx-post="/spike/{{ spike.start }}/resume">Pause again</button>
+  {% else %}
+    ⚡ Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — {{ "paused now" if spike.active else "will pause" }}: {{ spike.zones }}.
+    <button type="button" hx-post="/spike/{{ spike.start }}/override">Keep heating</button>
+  {% endif %}
+</p>
+{% endif %}
+
 {% if away.end and away.start and away.start.timestamp() <= now_ts < away.end.timestamp() %}
 <p class="notice">Away until {{ away.end.strftime("%a %d.%m %H:%M") }} — <a href="/control">change</a></p>
 {% endif %}

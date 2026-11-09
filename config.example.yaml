@@ -125,8 +125,19 @@ hot_water:
   evening_hours: 1
   boost_below_pct: 30         # outside the windows: boost once below this much hot water
 
+# Price spikes: pause these zones during the day's most expensive hours (override from the app or the notification)
+spike:
+  zones: [madli, matis, bathroom2, hot_water]
+  ratio: 1.4                  # spike hour: at least 1.4 × the day's average price …
+  min_price_c: 35             # … and at least 35 c/kWh incl. network, fees and VAT
+  max_hours: 3                # at most 3 spike hours a day (the most expensive)
+  preheat: true               # rooms warm up to their comfort max in the cheaper hour before
+  safety_min_temp: 18         # a paused room below this heats to its comfort min again
+  notify_before_min: 60
+
 notify:
   enabled: true
+  app_url: http://maska-heat:8000   # how the phones reach the app (Tailscale name), for notification buttons
   ntfy_server: https://ntfy.sh
   offline_alert_minutes: 30
   quiet_start: "23:00"

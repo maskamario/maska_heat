@@ -577,6 +577,21 @@ comfort penalty + hard penalties. Per zone, < 1 s on the Pi 3. Zones independent
 
 ---
 
+### 10.1 Price spikes — pause (`spike.py`, built before the planner)
+Rule-based, needs no thermal model. A **spike hour** costs ≥ 1.4 × the day's average and ≥ 35 c/kWh (all-in); at
+most 3 a day (the most expensive), single-hour gaps between them filled. On 28.10–9.11 this found 1–3 h on most
+days (e.g. 9.11: 16:00–19:00 at up to 50 c/kWh). Zones in `spike.zones` (bedrooms, bathroom floor, hot water — not
+the heat pump) **use no electricity** during a spike unless overridden:
+- Rooms in Smart: setpoint → the heater's minimum (5 °C); a room below `safety_min_temp` (18 °C, room sensor) gets
+  its comfort min instead. The hour before, if cheaper than the spike, they pre-heat to the comfort max.
+  Manual mode is left alone.
+- Floor thermostat (otherwise logged only): setpoint → 5 °C, restored afterwards unless someone changed it meanwhile.
+- Water heater: spike hours are left out of its windows; no boost during a spike.
+
+`notify_before_min` (60) before a spike, an ntfy message lists what pauses, with a **Keep heating** button (HTTP
+POST to `notify.app_url`/spike/<start>/override) and the dashboard shows a banner with the same override / "Pause
+again". The spike job runs every minute and nudges the executor and the water heater at start, end and override.
+
 ## 11. Executor & safety
 
 - Every 5 min: apply slot setpoint per zone **only if changed**; read back to confirm.

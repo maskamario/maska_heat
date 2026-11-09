@@ -23,6 +23,7 @@ from ..dashboard import as_dict, history, upcoming_prices, zone_views
 from ..db import Database
 from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
 from ..executor import Executor, describe_mode, zone_modes
+from .. import spike as spikes
 from ..hotwater import HotWaterController, describe as describe_windows, planned as hot_water_plan
 from ..notify import Notifier
 from ..schedule import MODE_LABEL
@@ -77,15 +78,31 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             if settings.hot_water
             else None
         )
+
+        def spike_changed() -> None:  # a spike started, ended or was overridden: act now, not at the next cycle
+            if start_jobs:
+                app.state.executor.trigger()
+                if app.state.hot_water:
+                    app.state.hot_water.trigger()
+
+        app.state.spikes = (
+            spikes.SpikeController(settings, app.state.db, app.state.collector.devices, app.state.notifier, spike_changed)
+            if settings.spike and settings.spike.enabled
+            else None
+        )
         if start_jobs:
             app.state.collector.start()
             app.state.executor.start()
             if app.state.hot_water:
                 app.state.hot_water.start()
+            if app.state.spikes:
+                app.state.spikes.start()
         yield
         await app.state.executor.stop()
         if app.state.hot_water:
             await app.state.hot_water.stop()
+        if app.state.spikes:
+            await app.state.spikes.stop()
         await app.state.collector.stop()
         await app.state.notifier.aclose()
         if own_db:
@@ -133,6 +150,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             outdoor = {"temp": weather["temp"], "source": "forecast"}
         return {
             "request": request,
+            "spike": spike_context(request, now),
             "energy_today": energy_summary(settings, db, "today", now),
             "zones": zone_views(settings, db, now),
             "price_now": next((p for p in prices if p.is_now), None),
@@ -143,6 +161,23 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "decisions": decisions(request),
             "now_ts": now,
             "away": _store(request).away(),
+        }
+
+    def spike_context(request: Request, now: float) -> dict | None:
+        if not (settings.spike and settings.spike.enabled and settings.spike.zones):
+            return None
+        s = spikes.next_or_active(settings, _db(request), now)
+        if s is None:
+            return None
+        start = datetime.fromtimestamp(s.start, tz)
+        day = "" if start.date() == datetime.fromtimestamp(now, tz).date() else "tomorrow "
+        return {
+            "start": s.start,
+            "label": f"{day}{s.label(tz)}",
+            "peak_c": s.peak * 100,
+            "active": s.start <= now,
+            "overridden": spikes.overridden(_db(request), s),
+            "zones": ", ".join(settings.zones[z].name for z in settings.spike.zones if z in settings.zones),
         }
 
     def fires_context(request: Request) -> dict:
@@ -442,6 +477,24 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         if zone not in settings.zones:
             raise HTTPException(404, "unknown zone")
         return JSONResponse(history(settings, _db(request), zone, min(max(hours, 1), 24 * 31), time.time()))
+
+    def _spike_override(request: Request, start: int, on: bool):
+        if not any(s.start == start for s in spikes.spikes_around(settings, _db(request), time.time())):
+            raise HTTPException(404, "no such price spike")
+        spikes.set_override(_db(request), start, on)
+        label = datetime.fromtimestamp(start, tz).strftime("%a %H:%M")
+        _db(request).add_event("info", "spike", f"price spike at {label}: " + ("keep heating (override)" if on else "pause again"))
+        if start_jobs and request.app.state.spikes:
+            request.app.state.spikes.on_change()
+        return Response(headers={"HX-Refresh": "true"})
+
+    @app.post("/spike/{start}/override")
+    async def spike_override(request: Request, start: int):
+        return _spike_override(request, start, True)
+
+    @app.post("/spike/{start}/resume")
+    async def spike_resume(request: Request, start: int):
+        return _spike_override(request, start, False)
 
     @app.get("/energy", response_class=HTMLResponse)
     async def energy_page(request: Request, period: str = "today"):

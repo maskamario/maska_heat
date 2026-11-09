@@ -118,8 +118,22 @@ class HotWaterSettings(BaseModel):
     boost_below_pct: float = 30.0  # outside the windows, boost once when hot water drops below this
 
 
+class SpikeSettings(BaseModel):
+    """Pause heating during price spikes (maska_heat/spike.py)."""
+
+    enabled: bool = True
+    zones: list[str] = []  # zones that pause: rooms in Smart mode, floor thermostats, the water heater
+    ratio: float = 1.4  # a spike hour costs at least this × the day's average price …
+    min_price_c: float = 35.0  # … and at least this many cents per kWh (incl. network, fees, VAT)
+    max_hours: int = 3  # at most this many spike hours a day (the most expensive)
+    preheat: bool = True  # rooms warm up to their comfort max in the (cheaper) hour before
+    safety_min_temp: float = 18.0  # a paused room below this heats to its comfort min again
+    notify_before_min: int = 60
+
+
 class NotifySettings(BaseModel):
     enabled: bool = True
+    app_url: str | None = None  # how the phones reach the app, for buttons in notifications
     ntfy_server: str = "https://ntfy.sh"
     offline_alert_minutes: int = 30
     quiet_start: time = time(23, 0)
@@ -142,6 +156,7 @@ class Settings(BaseModel):
     outdoor_sensor: str | None = None
     zones: dict[str, ZoneSettings] = {}
     hot_water: HotWaterSettings | None = None
+    spike: SpikeSettings | None = None
     notify: NotifySettings = NotifySettings()
     web: WebSettings = WebSettings()
     database: str = "data/maska_heat.db"
@@ -172,6 +187,10 @@ class Settings(BaseModel):
                 raise ValueError(f"hot_water: zone {self.hot_water.zone!r} must be a zone with a cozytouch water heater")
             if not 1 <= self.hot_water.hours_per_day <= 24:
                 raise ValueError("hot_water: hours_per_day must be 1–24")
+        if self.spike:
+            for z in self.spike.zones:
+                if z not in self.zones:
+                    raise ValueError(f"spike: unknown zone {z!r}")
         if self.outdoor_sensor and self.outdoor_sensor not in self.sensors:
             raise ValueError(f"outdoor_sensor: unknown sensor {self.outdoor_sensor!r}")
         return self
