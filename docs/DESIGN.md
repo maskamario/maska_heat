@@ -602,6 +602,12 @@ heater gets `room target + median(heater sensor − room sensor over 20 min)`, c
 smaller than ¾ of the step are not sent. At equilibrium the heater holds its own sensor at that setpoint, which puts
 the room on target whatever the door does. Without a fresh room sensor (10 min) or with a gap over 6 °C, the target
 goes to the heater as before. The spike pause (heater minimum) is a heater value and is not shifted.
+The gap is not constant, though: while the Adax heats, its own sensor reads lower (it draws cold air in at the bottom),
+so on 9.11 the room settled 0.4–0.6 °C below target with the door closed. An integral **trim** fixes the rest: every
+control cycle, `trim += 1.5 × (room target − room mean over 10 min) × hours since last cycle`, capped at ±3 °C and kept
+in kv `room_trim`, added to the heater setpoint. It learns only while the room is within 1 °C of the target (no wind-up
+while warming up after a target change), not at the heater's limits, and not during the spike pause or without a room
+sensor.
 
 - Every 5 min: apply slot setpoint per zone **only if changed**; read back to confirm.
 - Never power devices on/off. Device found off → skip zone, notify once.

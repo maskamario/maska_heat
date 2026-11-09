@@ -62,7 +62,7 @@
     {% endif %}
 
     {% if ctl.mode != "handsoff" and decision.offset is not none %}
-      <p class="muted small">Heater set to {{ "%.1f" | format(decision.setpoint) }} °C — its own sensor reads {{ "%.1f" | format(-decision.offset) if decision.offset < 0 else "%.1f" | format(decision.offset) }} °C {{ "lower" if decision.offset < 0 else "higher" }} than the room right now.</p>
+      <p class="muted small">Heater set to {{ "%.1f" | format(decision.setpoint) }} °C — its own sensor reads {{ "%.1f" | format(-decision.offset) if decision.offset < 0 else "%.1f" | format(decision.offset) }} °C {{ "lower" if decision.offset < 0 else "higher" }} than the room right now{% if decision.trim | abs >= 0.1 %}, plus a learned correction of {{ "%+.1f" | format(decision.trim) }} °C so the room settles on target{% endif %}.</p>
     {% endif %}
     {% if ctl.mode != "handsoff" %}
       {% if decision.blocked %}

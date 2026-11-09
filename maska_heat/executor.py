@@ -12,6 +12,7 @@ device's current one; a sent value is not repeated while the device may still be
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -32,6 +33,11 @@ RUN_SECONDS = 5 * 60
 OFFSET_WINDOW = 20 * 60  # heater-vs-room gap: median over this long
 ROOM_SENSOR_FRESH = 10 * 60
 MAX_OFFSET = 6.0  # a bigger gap is implausible: fall back to the heater's own sensor
+TRIM_KEY = "room_trim"  # kv: zone -> {"trim": °C, "ts": last update}
+TRIM_GAIN = 1.5  # °C of heater setpoint per °C of room error per hour
+TRIM_MAX = 3.0
+TRIM_BAND = 1.0  # only learn while the room is within this of the target (not while warming up after a change)
+TRIM_MAX_STEP = 15 * 60  # longest gap counted between two updates
 PENDING_SECONDS = 10 * 60  # don't re-send the same value within this time
 FRESH_READING_SECONDS = 15 * 60
 
@@ -46,6 +52,7 @@ class ZoneDecision:
     heater_units: bool = False  # setpoint is already a heater value (spike pause), not a room target
     room_target: float | None = None  # room-sensor control: the room temperature aimed at
     offset: float | None = None  # room-sensor control: heater sensor − room sensor, °C
+    trim: float = 0.0  # room-sensor control: learned correction when the room settles off target, °C
 
 
 def heater_offset(db: Database, device: str, sensor_source: str, now: float) -> float | None:
@@ -66,6 +73,12 @@ def heater_offset(db: Database, device: str, sensor_source: str, now: float) -> 
     mid = len(gaps) // 2
     offset = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2
     return offset if abs(offset) <= MAX_OFFSET else None
+
+
+def room_temp(db: Database, sensor_source: str, now: float, window: int = 10 * 60) -> float | None:
+    """Mean room-sensor temperature over the last minutes (None if the sensor is silent)."""
+    temps = [r["temp"] for r in db.readings(sensor_source, int(now - window), int(now) + 1) if r["temp"] is not None]
+    return sum(temps) / len(temps) if temps else None
 
 
 class Executor:
@@ -114,14 +127,47 @@ class Executor:
             d.label += " (room sensor unavailable: heater's own sensor)"
             return
         caps = self.devices[zone.device].capabilities
-        wanted = d.setpoint + offset
+        trim = self.trim(zone_key)
+        wanted = d.setpoint + offset + trim
         latest = self.db.latest_reading(f"device:{zone.device}")
         current = latest["setpoint"] if latest else None
         if current is not None and abs(wanted - current) < 0.75 * caps.setpoint_step:
             setpoint = current  # within the heater's step: keep it, no flip-flopping
         else:
             setpoint = caps.clamp(wanted)
-        d.room_target, d.offset, d.setpoint = d.setpoint, offset, setpoint
+        d.room_target, d.offset, d.trim, d.setpoint = d.setpoint, offset, trim, setpoint
+
+    # room-sensor feedback ---------------------------------------------------------
+
+    def _trims(self) -> dict:
+        raw = self.db.get_kv(TRIM_KEY)
+        return json.loads(raw) if raw else {}
+
+    def trim(self, zone_key: str) -> float:
+        return self._trims().get(zone_key, {}).get("trim", 0.0)
+
+    def update_trim(self, zone_key: str, d: ZoneDecision, now: float) -> None:
+        """Integral feedback: if the room stays below (above) its target, nudge the heater setpoint up (down).
+
+        The heater-vs-room gap alone leaves the room a few tenths off, because the gap changes while the
+        heater runs. Learns only while the room is near the target (no wind-up after a target change) and
+        not while the heater is already at its limit.
+        """
+        trims = self._trims()
+        entry = trims.get(zone_key, {"trim": 0.0, "ts": now})
+        dt = min(max(now - entry["ts"], 0), TRIM_MAX_STEP)
+        entry["ts"] = now
+        zone = self.settings.zones[zone_key]
+        sensor = next(s for s in zone.temp_sources if s.startswith("sensor:"))
+        room = room_temp(self.db, sensor, now)
+        if d.room_target is not None and d.offset is not None and room is not None:
+            error = d.room_target - room
+            caps = self.devices[zone.device].capabilities
+            at_limit = (error > 0 and d.setpoint >= caps.setpoint_max) or (error < 0 and d.setpoint <= caps.setpoint_min)
+            if abs(error) <= TRIM_BAND and not at_limit:
+                entry["trim"] = max(-TRIM_MAX, min(TRIM_MAX, entry["trim"] + TRIM_GAIN * error * dt / 3600))
+        trims[zone_key] = entry
+        self.db.set_kv(TRIM_KEY, json.dumps(trims))
 
     def _decide(self, zone_key: str, now: float, snap: Snapshot | None) -> ZoneDecision:
         ctl = self.store.zone(zone_key)
@@ -200,6 +246,8 @@ class Executor:
             return
 
         decision = self.decide(zone_key)
+        if zone.control_by == "room":
+            self.update_trim(zone_key, decision, time.time())
         if decision.smart and decision.smart.preheat_for:
             self._preheating_for[zone_key] = decision.smart.preheat_for
         else:

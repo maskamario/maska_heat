@@ -110,3 +110,39 @@ def test_cards_show_room_target(settings, db):
         page = client.get("/control").text
         assert "Heater set to 17.0 °C" in page and "3.1 °C lower than the room" in page
         assert "(heater 17)" in client.get("/").text
+
+
+def test_feedback_raises_heater_when_room_stays_low(rig):
+    ex, store, db = rig
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=22.0))
+    history(db, room=21.6, heater=19.0, setpoint=19.0, minutes=90, end=NOW + 3600)  # gap −2.6 → heater 19, room 0.4 low
+    assert ex.decide("madli", now=NOW).setpoint == 19.0
+    for k in range(13):  # an hour of 5-min cycles with the room 0.4 °C low
+        t = NOW + 300 * k
+        ex.update_trim("madli", ex.decide("madli", now=t), t)
+    assert ex.trim("madli") == pytest.approx(1.5 * 0.4 * 1.0, abs=0.01)
+    d = ex.decide("madli", now=NOW + 3600)
+    assert d.trim > 0.5 and d.setpoint == 20.0  # one Adax step up
+
+
+def test_feedback_lowers_heater_when_room_stays_high(rig):
+    ex, store, db = rig
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
+    history(db, room=20.6, heater=17.6, setpoint=17.0, minutes=90, end=NOW + 3600)  # gap −3 → heater 17, room 0.6 high
+    for k in range(13):
+        t = NOW + 300 * k
+        ex.update_trim("madli", ex.decide("madli", now=t), t)
+    assert ex.trim("madli") == pytest.approx(-0.6 * 1.5, abs=0.01)
+    assert ex.decide("madli", now=NOW + 3600).setpoint == 16.0
+
+
+def test_feedback_does_not_wind_up(rig):
+    ex, store, db = rig
+    history(db, room=19.0, heater=16.0, setpoint=17.0)
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=22.0))  # 3 °C below: still warming up
+    for k in range(13):
+        ex.update_trim("madli", ex.decide("madli", now=NOW), NOW + 300 * k)
+    assert ex.trim("madli") == 0.0
+    db.add_readings([Reading(NOW + 3600 * 3, "device:madli_adax", temp=19.0, setpoint=17.0)])  # room sensor silent
+    ex.update_trim("madli", ex.decide("madli", now=NOW + 3600 * 3), NOW + 3600 * 3)
+    assert ex.trim("madli") == 0.0
