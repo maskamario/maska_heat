@@ -53,7 +53,7 @@ ABIRUUM 1 is now bathroom 2, the two-circle symbol beside it is the wood cooksto
 | **Matis's bedroom** | Mill OIL1500WIFI3 (Gen 3), oil radiator, 1500 W | — |
 | **Living area** (living room + kitchen) | Mitsubishi MSZ-LN35VG2W / MUZ-LN35VGHZ2 heat pump (Hyper Heating) + **IKEA TIMMERFLOTTE room sensor** (planned, §3.6) | Masonry heater, wood cookstove with thermal mass wall |
 | **Hall** (upstairs, between kids' rooms) | none — passive | Gets heat from neighbouring zones and up the open stair; the masonry heater's chimney passes through it but adds little heat. Sensor planned (§3.6) |
-| **Bathroom 2** (ground floor, 4.6 m², former ABIRUUM 1) | Electric floor heating, **Heatline HL-05** Wi-Fi thermostat (Tuya / Smart Life, = Hysen HY511WE) — installed, **not integrated yet** (§3.5) | Next to the wood cookstove |
+| **Bathroom 2** (ground floor, 4.6 m², former ABIRUUM 1) | Electric floor heating, **Heatline HL-05** Wi-Fi thermostat (Tuya / Smart Life, = Hysen HY511WE) — **logged only** since 2026-11-09, not controlled yet (§3.5) | Next to the wood cookstove |
 | **Bathroom 1** (ground floor, 8.4 m² + sauna) | Floor heating + thermostat — **deferred**, design hook only (§3.5) | Sauna |
 
 ### 1.1 Open doors and coupled spaces
@@ -158,11 +158,35 @@ The unit is registered in **classic MELCloud**, which has a well-known (unoffici
 - **Summer**: user switches it off. If the app finds it powered off during heating season it does **not** turn it
   on — it marks the zone "off by user" and sends one notification.
 
-### 3.5 Bathroom floor heating — deferred
-Design hook only: `kind="floor"` zones, controlled by **floor** temperature, with their own modes (§5.3) and a
-mold-prevention minimum. Thermostat model and integration chosen when bathrooms are built. Preference: a
-thermostat with a **local** API and floor sensor — Zigbee (via a USB stick + Zigbee2MQTT, which can also serve
-future room sensors) or Tuya WiFi via local protocol.
+### 3.5 Bathroom floor heating — logging only
+Bathroom 2 has a **Heatline HL-05** (Tuya, = Hysen HY511WE) on Wi-Fi, read **locally** with `tinytuya`
+(`adapters/tuya_thermostat.py`, protocol 3.5, every 60 s). The local key comes once from a Tuya IoT cloud project
+linked to the Smart Life account (`python -m tinytuya wizard`) and lives in `secrets.yaml → tuya → <device>`; it
+changes if the thermostat is re-paired in the app. Check with `python -m maska_heat.probe tuya`.
+
+Data points (from the device's Tuya thing model; temperatures in 0.1 °C):
+
+| DP | Code | Use |
+|---|---|---|
+| 1 | Power | on/off |
+| 3 | temp_set | setpoint, 5–35 °C in 0.5 °C steps |
+| 4 | Mode | Manual / Program / Holiday / TempProg |
+| 12 | Fault | fault bitmap |
+| 24 | temp_current | current temperature → `readings.temp` |
+| 102 | Heating_state | relay on → `readings.is_heating` |
+| 103 | Ext_temperature | floor sensor → `readings.floor_temp` |
+| 109 / 110 / 111 | room_temp_compensate / room_temp_zone / ext_temp_zone | calibration −1.0 °C, hysteresis 1.0 °C room / 2 °C floor |
+| 112 / 113 | high_temp_limit / low_temp_limit | floor overheat cut-off 30 °C, frost protection 5 °C |
+| 114 / 115 | set_temp_max / set_temp_min | allowed setpoint range |
+| 116 | temp_sensor_type | `in` / `ext` / `all` — set to `ext` (controls on the floor sensor) |
+| 117 / 118 | power_state / Prog_Type | after power cut: `keep`; weekly program layout |
+| 119–122 | Prog_* | weekly program (raw, not reported in status) |
+
+The adapter is **read-only** (`writable=False`): the zone shows "Logging only" and the executor never writes to it,
+whatever mode is stored. Open question for the logged data: whether `temp_current` is the air or the controlled
+(floor) temperature — on 2026-11-09 it read 27.0 °C with the floor at 28.0 °C, setpoint 27.0 °C, still heating.
+Next: learn the floor's heating and cooling rates, then control by **floor** temperature (`kind="floor"`), with
+its own modes (§5.3) and a mold-prevention minimum. Rated power of the floor mat still unknown (for energy estimates).
 
 ---
 

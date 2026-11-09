@@ -47,7 +47,8 @@
     <dl>
       <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
       {% set d = decisions[z.key] %}
-      <div><dt>Control</dt><dd><a href="/control">{{ mode_name(d.mode) }}</a>{% if d.mode == "smart" %} · {{ d.label }}{% endif %}</dd></div>
+      <div><dt>Control</dt><dd>{% if d.mode == "logging" %}{{ mode_name(d.mode) }}{% else %}<a href="/control">{{ mode_name(d.mode) }}</a>{% endif %}{% if d.mode == "smart" %} · {{ d.label }}{% endif %}</dd></div>
+      {% if z.floor_temp is not none %}<div><dt>Floor</dt><dd>{{ "%.1f" | format(z.floor_temp) }} °C</dd></div>{% endif %}
       {% if z.humidity is not none %}<div><dt>Humidity</dt><dd>{{ "%.0f" | format(z.humidity) }} %</dd></div>{% endif %}
       <div><dt>Source</dt><dd>{{ (z.temp_source or "—").split(":")[0] }}</dd></div>
       <div><dt>Updated</dt><dd>{{ z.updated_at | age }}</dd></div>

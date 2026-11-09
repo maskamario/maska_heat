@@ -57,6 +57,15 @@ def build_adapter(name: str, cfg: DeviceSettings, secrets: dict[str, Any]) -> De
         if not mel.get("email") or not mel.get("password"):
             raise ValueError(f"device {name}: melcloud email/password missing in secrets.yaml")
         return MelcloudAdapter(mel["email"], mel["password"], device_name=cfg.device_name)
+    if cfg.type == "tuya_thermostat":
+        from .adapters.tuya_thermostat import TuyaThermostatAdapter
+
+        key = (secrets.get("tuya") or {}).get(name)
+        if not cfg.host or not cfg.device_id:
+            raise ValueError(f"device {name}: host and device_id are needed")
+        if not key:
+            raise ValueError(f"device {name}: local key missing in secrets.yaml → tuya → {name}")
+        return TuyaThermostatAdapter(cfg.device_id, cfg.host, key, version=cfg.protocol)
     raise ValueError(f"device {name}: unknown type {cfg.type}")
 
 
@@ -137,7 +146,7 @@ class Collector:
             [
                 Reading(
                     int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, s.power_w, s.energy_kwh,
-                    mode=s.mode,
+                    mode=s.mode, floor_temp=s.floor_temp,
                 )
             ]
         )

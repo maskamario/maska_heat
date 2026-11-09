@@ -179,14 +179,16 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     def zone_card_context(request: Request, zone_key: str) -> dict:
         views = {v.key: v for v in zone_views(settings, _db(request), time.time())}
         dev = settings.zones[zone_key].device
+        decision = _executor(request).decide(zone_key)
         return {
             "request": request,
             "key": zone_key,
             "zone": settings.zones[zone_key],
             "view": views[zone_key],
             "ctl": _store(request).zone(zone_key),
-            "decision": _executor(request).decide(zone_key),
-            "controllable": bool(dev) and dev in request.app.state.collector.devices,
+            "decision": decision,
+            "controllable": bool(dev) and dev in request.app.state.collector.devices and decision.mode != "logging",
+            "logging_only": decision.mode == "logging",
         }
 
     def control_context(request: Request, error: str | None = None) -> dict:

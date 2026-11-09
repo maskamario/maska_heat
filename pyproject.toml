@@ -21,8 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 melcloud = ["pymelcloud>=2.5.9", "aiohttp>=3.9"]
 esphome = ["aioesphomeapi>=24.0"]
+tuya = ["tinytuya>=1.15"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
-all = ["maska-heat[melcloud,esphome]"]
+all = ["maska-heat[melcloud,esphome,tuya]"]
 
 [project.scripts]
 maska-heat = "maska_heat.__main__:main"

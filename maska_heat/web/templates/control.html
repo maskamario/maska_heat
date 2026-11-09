@@ -19,7 +19,7 @@
 
 <section class="zones">
   {% for c in cards %}
-    {% with key=c.key, zone=c.zone, view=c.view, ctl=c.ctl, decision=c.decision, controllable=c.controllable %}
+    {% with key=c.key, zone=c.zone, view=c.view, ctl=c.ctl, decision=c.decision, controllable=c.controllable, logging_only=c.logging_only %}
       {% include "_control_zone.html" %}
     {% endwith %}
   {% endfor %}

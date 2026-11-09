@@ -22,6 +22,7 @@ class ZoneView:
     temp_source: str | None
     humidity: float | None
     setpoint: float | None
+    floor_temp: float | None
     power_on: bool | None
     is_heating: bool | None
     power_w: float | None
@@ -76,6 +77,7 @@ def zone_views(settings: Settings, db: Database, now: float) -> list[ZoneView]:
                 temp_source=temp_source,
                 humidity=humidity,
                 setpoint=dev["setpoint"] if dev else None,
+                floor_temp=dev["floor_temp"] if dev else None,
                 power_on=flag("power_on"),
                 is_heating=flag("is_heating"),
                 power_w=dev["power_w"] if dev else None,
@@ -133,6 +135,7 @@ def history(settings: Settings, db: Database, zone_key: str, hours: int, now: fl
             "setpoint": [[r["ts"] * 1000, r["setpoint"]] for r in rows if r["setpoint"] is not None],
             "power_w": [[r["ts"] * 1000, r["power_w"]] for r in rows if r["power_w"] is not None],
             "humidity": [[r["ts"] * 1000, r["humidity"]] for r in rows if r["humidity"] is not None],
+            "floor_temp": [[r["ts"] * 1000, r["floor_temp"]] for r in rows if r["floor_temp"] is not None],
         }
     outdoor = [[r["ts"] * 1000, r["temp"]] for r in db.weather(since, int(now) + 3600)]
     if settings.outdoor_sensor:

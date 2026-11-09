@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS readings (
     power_w     REAL,
     energy_kwh  REAL,                  -- device counter; unreliable for MELCloud (use the energy table)
     humidity    REAL,
-    mode        TEXT                   -- device operating mode as reported (e.g. heat, Control individually)
+    mode        TEXT,                  -- device operating mode as reported (e.g. heat, Control individually)
+    floor_temp  REAL                   -- floor sensor of a floor heating thermostat
 );
 CREATE INDEX IF NOT EXISTS readings_source_ts ON readings(source, ts);
 
@@ -111,6 +112,7 @@ class Reading:
     energy_kwh: float | None = None
     humidity: float | None = None
     mode: str | None = None
+    floor_temp: float | None = None
 
 
 def _b(v: bool | None) -> int | None:
@@ -135,6 +137,8 @@ class Database:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(readings)")}
         if "mode" not in cols:  # added in schema 3
             self._conn.execute("ALTER TABLE readings ADD COLUMN mode TEXT")
+        if "floor_temp" not in cols:  # added in schema 5
+            self._conn.execute("ALTER TABLE readings ADD COLUMN floor_temp REAL")
 
     def close(self) -> None:
         with self._lock:
@@ -164,10 +168,11 @@ class Database:
 
     def add_readings(self, readings: list[Reading]) -> None:
         self._many(
-            "INSERT INTO readings (ts, source, temp, setpoint, power_on, is_heating, power_w, energy_kwh, humidity, mode)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO readings (ts, source, temp, setpoint, power_on, is_heating, power_w, energy_kwh, humidity, mode,"
+            " floor_temp) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             [
-                (r.ts, r.source, r.temp, r.setpoint, _b(r.power_on), _b(r.is_heating), r.power_w, r.energy_kwh, r.humidity, r.mode)
+                (r.ts, r.source, r.temp, r.setpoint, _b(r.power_on), _b(r.is_heating), r.power_w, r.energy_kwh, r.humidity, r.mode,
+                 r.floor_temp)
                 for r in readings
             ],
         )

@@ -4,7 +4,9 @@
     <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C now{% endif %}</span>
   </header>
 
-  {% if not controllable %}
+  {% if logging_only %}
+    <p class="muted">Logging only — maska-heat records this heater but does not control it yet.</p>
+  {% elif not controllable %}
     <p class="muted">Heater not set up — nothing to control.</p>
   {% else %}
     <div class="seg" role="group" aria-label="Control mode for {{ zone.name }}">

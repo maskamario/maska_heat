@@ -64,6 +64,7 @@
     Object.entries(data.series).forEach(([source, s], i) => {
       const kind = source.split(":")[0];
       if (s.temp.length) datasets.push(lineSet(`${kind} temp`, s.temp, palette[i % palette.length]));
+      if (s.floor_temp && s.floor_temp.length) datasets.push(lineSet(`floor temp`, s.floor_temp, css("--day"), { borderWidth: 1.5 }));
       if (s.setpoint.length) datasets.push(lineSet(`setpoint`, s.setpoint, css("--cool"), { borderDash: [6, 4], borderWidth: 1.5, stepped: true, tension: 0 }));
       if (s.power_w.length) datasets.push(lineSet(`heater W`, s.power_w, css("--accent-soft"), { yAxisID: "power", stepped: true, fill: true, borderWidth: 0, tension: 0, order: 10 }));
     });

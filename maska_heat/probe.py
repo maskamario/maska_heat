@@ -7,6 +7,7 @@
     python -m maska_heat.probe melcloud [--set 21] [--energy 35]
     python -m maska_heat.probe sensor living [--seconds 20]
     python -m maska_heat.probe dirigera [--host 192.168.1.30]
+    python -m maska_heat.probe tuya [bathroom2_floor] [--host 192.168.1.15]
 
 Reads are always safe. Anything that changes a device needs an explicit flag.
 """
@@ -201,6 +202,28 @@ async def probe_dirigera(cfg: dict, secrets: dict, args) -> None:
         print(f"  {d.kind:<11} {d.name!r:<24} {value:<18} reachable={d.reachable} last report {ago}, battery {d.battery} %")
 
 
+async def probe_tuya(cfg: dict, secrets: dict, args) -> None:
+    """Read-only: the Tuya floor thermostat's state and all its data points over the local network."""
+    from .adapters.tuya_thermostat import TuyaThermostatAdapter
+
+    name = args.name or next((n for n, d in (cfg.get("devices") or {}).items() if d.get("type") == "tuya_thermostat"), None)
+    dev = (cfg.get("devices") or {}).get(name or "")
+    if not dev:
+        raise ConfigError("no tuya_thermostat device in config.yaml")
+    key = (secrets.get("tuya") or {}).get(name)
+    if not key:
+        raise ConfigError(f"no local key in secrets.yaml → tuya → {name}")
+    host = args.host or dev["host"]
+    tuya = TuyaThermostatAdapter(dev["device_id"], host, key, version=dev.get("protocol", 3.5))
+    try:
+        s = await tuya.read()
+    finally:
+        await tuya.aclose()
+    _print_state(f"Tuya {name} ({host})", s, raw=False)
+    print(f"  floor     : {s.floor_temp} °C")
+    print("  data points: " + " ".join(f"{dp}={v!r}" for dp, v in sorted(s.raw.items(), key=lambda kv: int(kv[0]))))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="maska-probe", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="target", required=True)
@@ -222,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seconds", type=float, default=20)
     dg = sub.add_parser("dirigera")
     dg.add_argument("--host", help="override dirigera host from config.yaml")
+    t = sub.add_parser("tuya")
+    t.add_argument("name", nargs="?", help="device name in config.yaml (default: the first tuya_thermostat)")
+    t.add_argument("--host", help="override host from config.yaml")
     args = parser.parse_args(argv)
 
     try:
@@ -239,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             coro = probe_melcloud(cfg, secrets, args)
         elif args.target == "dirigera":
             coro = probe_dirigera(cfg, secrets, args)
+        elif args.target == "tuya":
+            coro = probe_tuya(cfg, secrets, args)
         else:
             coro = probe_sensor(cfg, secrets, args)
         asyncio.run(coro)

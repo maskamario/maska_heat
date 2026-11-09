@@ -34,7 +34,7 @@ FRESH_READING_SECONDS = 15 * 60
 
 @dataclass
 class ZoneDecision:
-    mode: str  # handsoff | manual | smart
+    mode: str  # handsoff | manual | smart | logging (device is read-only)
     setpoint: float | None
     label: str
     smart: SmartTarget | None = None
@@ -78,6 +78,8 @@ class Executor:
             return ZoneDecision("handsoff", None, "Hands-off — heater follows its own app")
         if not zone.device or zone.device not in self.devices:
             return ZoneDecision(ctl.mode, None, "No controllable device", blocked="device not available")
+        if not self.devices[zone.device].capabilities.writable:
+            return ZoneDecision("logging", None, "Logging only — the app does not control this heater")
 
         latest = self.db.latest_reading(f"device:{zone.device}")
         blocked = None
@@ -113,7 +115,7 @@ class Executor:
     async def _apply(self, zone_key: str) -> None:
         zone = self.settings.zones[zone_key]
         adapter = self.devices.get(zone.device) if zone.device else None
-        if adapter is None:
+        if adapter is None or not adapter.capabilities.writable:
             return
         ctl = self.store.zone(zone_key)
 
@@ -226,7 +228,7 @@ class Executor:
 
 
 def describe_mode(mode: str) -> str:
-    return {"handsoff": "Hands-off", "manual": "Manual", "smart": "Smart"}[mode]
+    return {"handsoff": "Hands-off", "manual": "Manual", "smart": "Smart", "logging": "Logging only"}[mode]
 
 
 __all__ = ["Executor", "ZoneDecision", "describe_mode", "MODE_LABEL"]

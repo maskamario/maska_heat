@@ -42,6 +42,11 @@ devices:
     type: melcloud
     enabled: false            # enable once MELCloud login is in secrets.yaml
     device_name: null         # MELCloud device name; null = first air-to-air unit
+  bathroom2_floor:
+    type: tuya_thermostat     # Heatline HL-05 floor heating; logged only, not controlled
+    host: 192.168.1.15        # reserved DHCP address
+    device_id: ""             # Tuya device id (python -m tinytuya scan); local key in secrets.yaml → tuya
+    protocol: 3.5
 
 # IKEA DIRIGERA hub (local API; token in secrets.yaml → dirigera). Sensors and doors are matched by their name in
 # the IKEA Home app. Check with: python -m maska_heat.probe dirigera
@@ -80,6 +85,9 @@ zones:
     name: Living area
     device: living_mitsubishi
     temp_sources: [sensor:living, device:living_mitsubishi]   # first fresh source wins
+  bathroom2:
+    name: Bathroom 2
+    device: bathroom2_floor
 
 notify:
   enabled: true

@@ -39,6 +39,7 @@ class DeviceState:
     power_w: float | None = None
     energy_kwh: float | None = None
     mode: str | None = None  # operating mode as the device reports it
+    floor_temp: float | None = None  # floor sensor of a floor heating thermostat
     online: bool = True
     raw: dict[str, Any] = field(default_factory=dict)
 
