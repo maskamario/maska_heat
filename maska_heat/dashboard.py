@@ -20,6 +20,7 @@ class ZoneView:
     name: str
     temp: float | None
     temp_source: str | None
+    temp_kind: str  # 'air', or 'floor' for a floor heating zone without an air reading
     humidity: float | None
     setpoint: float | None
     floor_temp: float | None
@@ -51,21 +52,31 @@ def _stale_after(settings: Settings, source: str) -> int:
     return SENSOR_STALE_SECONDS
 
 
+def _temp(row) -> tuple[float | None, str]:
+    """Air temperature, or the floor temperature for a floor thermostat that reports no air reading."""
+    if row["temp"] is not None:
+        return row["temp"], "air"
+    if row["floor_temp"] is not None:
+        return row["floor_temp"], "floor"
+    return None, "air"
+
+
 def zone_views(settings: Settings, db: Database, now: float) -> list[ZoneView]:
     views = []
     for key, zone in settings.zones.items():
         temp = humidity = temp_source = updated = None
+        temp_kind = "air"
         stale = True
         for source in zone.temp_sources:
             row = db.latest_reading(source)
-            if row and row["temp"] is not None and now - row["ts"] <= _stale_after(settings, source):
-                temp, humidity, temp_source, updated, stale = row["temp"], row["humidity"], source, row["ts"], False
+            if row and _temp(row)[0] is not None and now - row["ts"] <= _stale_after(settings, source):
+                (temp, temp_kind), humidity, temp_source, updated, stale = _temp(row), row["humidity"], source, row["ts"], False
                 break
         enabled = bool(zone.device) and settings.devices[zone.device].enabled
         dev = db.latest_reading(f"device:{zone.device}") if zone.device else None
         dev_fresh = bool(dev) and now - dev["ts"] <= _stale_after(settings, f"device:{zone.device}")
-        if temp is None and dev and dev["temp"] is not None:  # show last known value, marked stale
-            temp, temp_source, updated = dev["temp"], f"device:{zone.device}", dev["ts"]
+        if temp is None and dev and _temp(dev)[0] is not None:  # show last known value, marked stale
+            (temp, temp_kind), temp_source, updated = _temp(dev), f"device:{zone.device}", dev["ts"]
 
         def flag(col: str) -> bool | None:
             return None if not dev or dev[col] is None else bool(dev[col])
@@ -76,6 +87,7 @@ def zone_views(settings: Settings, db: Database, now: float) -> list[ZoneView]:
                 name=zone.name,
                 temp=temp,
                 temp_source=temp_source,
+                temp_kind=temp_kind,
                 humidity=humidity,
                 setpoint=dev["setpoint"] if dev else None,
                 floor_temp=dev["floor_temp"] if dev else None,

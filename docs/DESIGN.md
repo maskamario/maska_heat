@@ -173,9 +173,9 @@ Data points (from the device's Tuya thing model; temperatures in 0.1 °C):
 | 3 | temp_set | setpoint, 5–35 °C in 0.5 °C steps |
 | 4 | Mode | Manual / Program / Holiday / TempProg |
 | 12 | Fault | fault bitmap |
-| 24 | temp_current | current temperature → `readings.temp` |
+| 24 | temp_current | the temperature it controls on, calibrated (as shown in Smart Life); floor sensor mode → `readings.floor_temp`, air sensor mode → `readings.temp` |
 | 102 | Heating_state | relay on → `readings.is_heating` |
-| 103 | Ext_temperature | floor sensor → `readings.floor_temp` |
+| 103 | Ext_temperature | floor sensor, **uncalibrated** (raw data only) |
 | 109 / 110 / 111 | room_temp_compensate / room_temp_zone / ext_temp_zone | calibration −1.0 °C, hysteresis 1.0 °C room / 2 °C floor |
 | 112 / 113 | high_temp_limit / low_temp_limit | floor overheat cut-off 30 °C, frost protection 5 °C |
 | 114 / 115 | set_temp_max / set_temp_min | allowed setpoint range |
@@ -184,8 +184,10 @@ Data points (from the device's Tuya thing model; temperatures in 0.1 °C):
 | 119–122 | Prog_* | weekly program (raw, not reported in status) |
 
 The adapter is **read-only** (`writable=False`): the zone shows "Logging only" and the executor never writes to it,
-whatever mode is stored. Open question for the logged data: whether `temp_current` is the air or the controlled
-(floor) temperature — on 2026-11-09 it read 27.0 °C with the floor at 28.0 °C, setpoint 27.0 °C, still heating.
+whatever mode is stored. In floor-sensor mode (`ext`, as installed) `temp_current` is the **calibrated floor
+temperature** — it matches the Smart Life app and stays exactly 1.0 °C below DP 103 (calibration −1.0 °C) — and
+there is no air reading, so the zone shows the floor temperature (a TIMMERFLOTTE would add air and humidity).
+Readings logged before schema 7 are corrected on upgrade.
 Next: learn the floor's heating and cooling rates, then control by **floor** temperature (`kind="floor"`), with
 its own modes (§5.3) and a mold-prevention minimum. Floor mat 420 W: power is logged as 420 W while `Heating_state` is on, 0 W otherwise.
 

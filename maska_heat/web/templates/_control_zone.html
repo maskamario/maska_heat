@@ -1,7 +1,7 @@
 <article class="zone ctl" id="ctl-{{ key }}">
   <header>
     <h2>{{ zone.name }}</h2>
-    <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C now{% endif %}</span>
+    <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C{% if view.temp_kind == "floor" %} floor{% endif %} now{% endif %}</span>
   </header>
 
   {% if logging_only %}

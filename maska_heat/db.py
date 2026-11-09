@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -131,11 +131,12 @@ class Database:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            old_version = self._conn.execute("PRAGMA user_version").fetchone()[0]
             self._conn.executescript(SCHEMA)
-            self._migrate()
+            self._migrate(old_version)
             self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
-    def _migrate(self) -> None:
+    def _migrate(self, old_version: int = 0) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(readings)")}
         if "mode" not in cols:  # added in schema 3
             self._conn.execute("ALTER TABLE readings ADD COLUMN mode TEXT")
@@ -143,6 +144,12 @@ class Database:
             self._conn.execute("ALTER TABLE readings ADD COLUMN floor_temp REAL")
         if "level_pct" not in cols:  # added in schema 6
             self._conn.execute("ALTER TABLE readings ADD COLUMN level_pct REAL")
+        if 5 <= old_version < 7:
+            # Schema 5-6 logged a floor thermostat's calibrated floor reading as temp and the raw sensor as
+            # floor_temp. Only floor thermostats (on their floor sensor) wrote floor_temp.
+            self._conn.execute(
+                "UPDATE readings SET floor_temp = temp, temp = NULL WHERE floor_temp IS NOT NULL AND temp IS NOT NULL"
+            )
 
     def close(self) -> None:
         with self._lock:

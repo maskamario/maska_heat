@@ -50,15 +50,21 @@ def with_bathroom(settings: Settings) -> Settings:
     return Settings.model_validate(raw)
 
 
-def test_parse_status_scales_tenths():
-    s = parse_status(DPS)
-    assert (s.room_temp, s.setpoint, s.floor_temp) == (27.0, 27.0, 28.0)
+def test_parse_status_floor_sensor_mode():
+    s = parse_status(DPS)  # "ext": DP 24 is the calibrated floor temperature (as in Smart Life), no air reading
+    assert (s.room_temp, s.setpoint, s.floor_temp) == (None, 27.0, 27.0)
     assert (s.power_on, s.is_heating, s.mode) == (True, True, "Manual")
+    assert s.raw["103"] == 280  # raw sensor kept only in the raw data
+
+
+def test_parse_status_air_sensor_mode():
+    s = parse_status(DPS | {"116": "in", "24": 231})
+    assert (s.room_temp, s.floor_temp) == (23.1, 28.0)
 
 
 async def test_read_and_errors():
     s = await tuya({"dps": DPS}).read()
-    assert s.floor_temp == 28.0 and s.raw["116"] == "ext"
+    assert s.floor_temp == 27.0 and s.raw["116"] == "ext"
     faulty = await tuya({"dps": DPS | {"12": 2}}).read()
     assert faulty.mode == "Manual fault 2"
     with pytest.raises(DeviceError, match="Network Error"):
@@ -90,14 +96,13 @@ async def test_collector_logs_floor_temp(settings, db):
     c.devices["bathroom2_floor"] = tuya({"dps": DPS})
     await c.poll_device("bathroom2_floor")
     row = db.latest_reading("device:bathroom2_floor")
-    assert (row["temp"], row["floor_temp"], row["setpoint"], row["is_heating"], row["mode"]) == (27.0, 28.0, 27.0, 1, "Manual")
+    assert (row["temp"], row["floor_temp"], row["setpoint"], row["is_heating"], row["mode"]) == (None, 27.0, 27.0, 1, "Manual")
     assert row["power_w"] == 420  # rated power while heating
 
-
     view = next(v for v in zone_views(s, db, time.time()) if v.key == "bathroom2")
-    assert (view.temp, view.floor_temp, view.is_heating) == (27.0, 28.0, True)
+    assert (view.temp, view.temp_kind, view.stale, view.is_heating) == (27.0, "floor", False, True)
     hist = history(s, db, "bathroom2", 1, time.time())
-    assert hist["series"]["device:bathroom2_floor"]["floor_temp"][0][1] == 28.0
+    assert hist["series"]["device:bathroom2_floor"]["floor_temp"][0][1] == 27.0
 
     # idle: 0 W (a new reading one second later, so it is the latest)
     c.devices["bathroom2_floor"] = tuya({"dps": DPS | {"102": False}})
@@ -108,7 +113,7 @@ async def test_collector_logs_floor_temp(settings, db):
 
 def test_logged_zone_is_never_controlled(settings, db):
     s = with_bathroom(settings)
-    db.add_readings([Reading(int(time.time()), "device:bathroom2_floor", temp=27.0, setpoint=27.0, power_on=True, floor_temp=28.0)])
+    db.add_readings([Reading(int(time.time()), "device:bathroom2_floor", setpoint=27.0, power_on=True, floor_temp=27.5)])
     app = create_app(s, SECRETS, start_jobs=False, db=db)
     with TestClient(app, follow_redirects=False) as client:
         written = []
@@ -122,7 +127,8 @@ def test_logged_zone_is_never_controlled(settings, db):
         page = client.get("/control").text
         assert "Logging only" in page
         assert 'hx-post="/control/bathroom2/mode"' not in page
-        assert "Floor" in client.get("/").text
+        assert "27.5<small>°C floor</small>" in client.get("/").text
+        assert "27.5 °C floor now" in page
 
         asyncio.run(app.state.executor.apply_zone("bathroom2"))
         assert written == []
@@ -142,4 +148,27 @@ def test_old_database_gets_floor_column(tmp_path):
     db = Database(path)
     db.add_readings([Reading(2, "device:x", temp=27.0, floor_temp=28.0)])
     assert [r["floor_temp"] for r in db.readings("device:x", 0)] == [None, 28.0]
+    db.close()
+
+
+def test_schema_6_floor_rows_are_corrected(tmp_path):
+    path = tmp_path / "v6.db"
+    db = Database(path)
+    db.add_readings([
+        Reading(1, "device:bathroom2_floor", temp=27.0, floor_temp=28.0),  # logged by schema 5-6: floor, raw sensor
+        Reading(1, "device:matis_mill", temp=19.0),
+        Reading(1, "device:water_heater", temp=67.8, level_pct=91),
+    ])
+    db.close()
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version=6")
+    conn.close()
+
+    db = Database(path)
+    rows = {r["source"]: r for r in db.readings("device:bathroom2_floor", 0) + db.readings("device:matis_mill", 0) + db.readings("device:water_heater", 0)}
+    assert (rows["device:bathroom2_floor"]["temp"], rows["device:bathroom2_floor"]["floor_temp"]) == (None, 27.0)
+    assert rows["device:matis_mill"]["temp"] == 19.0 and rows["device:water_heater"]["temp"] == 67.8
+    db.close()
+    db = Database(path)  # runs once: reopening does not move values again
+    assert db.latest_reading("device:bathroom2_floor")["floor_temp"] == 27.0
     db.close()

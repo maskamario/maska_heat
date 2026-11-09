@@ -4,7 +4,11 @@ Read-only for now: bathroom 2 is logged to learn how the floor behaves before an
 
 Data points, from the device's Tuya thing model (temperatures in 0.1 °C):
     1 Power · 3 temp_set · 4 Mode (Manual/Program/Holiday/TempProg) · 12 Fault · 24 temp_current
-    102 Heating_state · 103 Ext_temperature (floor sensor) · 116 temp_sensor_type (in/ext/all)
+    102 Heating_state · 103 Ext_temperature (floor sensor, raw) · 116 temp_sensor_type (in/ext/all)
+
+temp_current is the temperature the thermostat controls on, after its calibration (DP 109), and what the Smart Life
+app shows. With the floor sensor selected ("ext") that is the floor - the thermostat then reports no air
+temperature, and DP 103 is the same sensor uncalibrated (1.0 °C higher on 2026-11-09 with calibration -1.0 °C).
 """
 
 from __future__ import annotations
@@ -25,12 +29,14 @@ def _tenths(dps: dict[str, Any], dp: str) -> float | None:
 
 
 def parse_status(dps: dict[str, Any]) -> DeviceState:
+    controlled = _tenths(dps, DP_TEMP)
+    on_floor = dps.get(DP_SENSOR) == "ext"
     return DeviceState(
-        room_temp=_tenths(dps, DP_TEMP),
+        room_temp=None if on_floor else controlled,
         setpoint=_tenths(dps, DP_SETPOINT),
         power_on=dps.get(DP_POWER),
         is_heating=dps.get(DP_HEATING),
-        floor_temp=_tenths(dps, DP_FLOOR),
+        floor_temp=controlled if on_floor else _tenths(dps, DP_FLOOR),
         mode=dps.get(DP_MODE),
         raw=dict(dps),
     )
