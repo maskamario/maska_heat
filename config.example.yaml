@@ -64,6 +64,15 @@ sensors:
   living:
     type: dirigera
     device: Allkorrus         # name in the IKEA Home app; living room, inner wall
+  madli:
+    type: dirigera
+    device: Madli tuba
+  matis:
+    type: dirigera
+    device: Matise tuba
+  hall:
+    type: dirigera
+    device: Vahetuba          # upstairs hall between the kids' rooms
   outdoor:
     type: esphome
     enabled: false
@@ -76,20 +85,28 @@ doors:
   matis:
     device: Matise uks        # name in the IKEA Home app
     zone: matis
+  madli:
+    device: Madli uks
+    zone: madli
 
 zones:
   madli:
     name: Madli's bedroom
     device: madli_adax
+    temp_sources: [sensor:madli, device:madli_adax]   # room sensor first, heater as fallback
     school: true              # kids' room: school timetable applies (editable in UI)
   matis:
     name: Matis's bedroom
     device: matis_mill
+    temp_sources: [sensor:matis, device:matis_mill]
     school: true              # kids' room: school timetable applies (editable in UI)
   living:
     name: Living area
     device: living_mitsubishi
     temp_sources: [sensor:living, device:living_mitsubishi]   # first fresh source wins
+  hall:
+    name: Upstairs hall
+    temp_sources: [sensor:hall]   # no heater: warmed by the bedrooms and the open stair
   bathroom2:
     name: Bathroom 2
     device: bathroom2_floor
