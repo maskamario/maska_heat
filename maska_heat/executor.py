@@ -74,12 +74,12 @@ class Executor:
         now = now or time.time()
         ctl = self.store.zone(zone_key)
         zone = self.settings.zones[zone_key]
+        if zone.device in self.devices and not self.devices[zone.device].capabilities.writable:
+            return ZoneDecision("logging", None, "Logging only — the app does not control this heater")
         if ctl.mode == "handsoff":
             return ZoneDecision("handsoff", None, "Hands-off — heater follows its own app")
         if not zone.device or zone.device not in self.devices:
             return ZoneDecision(ctl.mode, None, "No controllable device", blocked="device not available")
-        if not self.devices[zone.device].capabilities.writable:
-            return ZoneDecision("logging", None, "Logging only — the app does not control this heater")
 
         latest = self.db.latest_reading(f"device:{zone.device}")
         blocked = None

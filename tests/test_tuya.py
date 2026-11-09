@@ -104,6 +104,8 @@ def test_logged_zone_is_never_controlled(settings, db):
     with TestClient(app, follow_redirects=False) as client:
         written = []
         app.state.collector.devices["bathroom2_floor"].set_setpoint = lambda t: written.append(t)
+        assert app.state.executor.decide("bathroom2").mode == "logging"  # the default hands-off too
+        assert 'hx-post="/control/bathroom2/mode"' not in client.get("/control").text
         app.state.store.set_zone("bathroom2", ZoneControl(mode="manual", manual_setpoint=20))  # even if asked to
         decision = app.state.executor.decide("bathroom2")
         assert decision.mode == "logging" and decision.setpoint is None
