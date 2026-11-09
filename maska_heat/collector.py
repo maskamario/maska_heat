@@ -142,10 +142,14 @@ class Collector:
         except Exception as e:
             self._failed(source, e)
             return
+        power_w = s.power_w
+        rated = self.settings.devices[name].power_w
+        if power_w is None and rated and s.is_heating is not None:  # on/off heater: rated power while heating
+            power_w = rated if s.is_heating else 0.0
         self.db.add_readings(
             [
                 Reading(
-                    int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, s.power_w, s.energy_kwh,
+                    int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, power_w, s.energy_kwh,
                     mode=s.mode, floor_temp=s.floor_temp,
                 )
             ]

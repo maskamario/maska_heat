@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import time
 from zoneinfo import ZoneInfo
@@ -44,7 +45,7 @@ def tuya(result) -> TuyaThermostatAdapter:
 
 def with_bathroom(settings: Settings) -> Settings:
     raw = settings.model_dump(mode="json")
-    raw["devices"]["bathroom2_floor"] = {"type": "tuya_thermostat", "host": "tuya.test", "device_id": "bf69"}
+    raw["devices"]["bathroom2_floor"] = {"type": "tuya_thermostat", "host": "tuya.test", "device_id": "bf69", "power_w": 420}
     raw["zones"]["bathroom2"] = {"name": "Bathroom 2", "device": "bathroom2_floor"}
     return Settings.model_validate(raw)
 
@@ -90,11 +91,19 @@ async def test_collector_logs_floor_temp(settings, db):
     await c.poll_device("bathroom2_floor")
     row = db.latest_reading("device:bathroom2_floor")
     assert (row["temp"], row["floor_temp"], row["setpoint"], row["is_heating"], row["mode"]) == (27.0, 28.0, 27.0, 1, "Manual")
+    assert row["power_w"] == 420  # rated power while heating
+
 
     view = next(v for v in zone_views(s, db, time.time()) if v.key == "bathroom2")
     assert (view.temp, view.floor_temp, view.is_heating) == (27.0, 28.0, True)
     hist = history(s, db, "bathroom2", 1, time.time())
     assert hist["series"]["device:bathroom2_floor"]["floor_temp"][0][1] == 28.0
+
+    # idle: 0 W (a new reading one second later, so it is the latest)
+    c.devices["bathroom2_floor"] = tuya({"dps": DPS | {"102": False}})
+    await asyncio.sleep(1.05)
+    await c.poll_device("bathroom2_floor")
+    assert db.latest_reading("device:bathroom2_floor")["power_w"] == 0
 
 
 def test_logged_zone_is_never_controlled(settings, db):
@@ -114,8 +123,6 @@ def test_logged_zone_is_never_controlled(settings, db):
         assert "Logging only" in page
         assert 'hx-post="/control/bathroom2/mode"' not in page
         assert "Floor" in client.get("/").text
-
-        import asyncio
 
         asyncio.run(app.state.executor.apply_zone("bathroom2"))
         assert written == []

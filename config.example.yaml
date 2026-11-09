@@ -47,6 +47,7 @@ devices:
     host: 192.168.1.15        # reserved DHCP address
     device_id: ""             # Tuya device id (python -m tinytuya scan); local key in secrets.yaml → tuya
     protocol: 3.5
+    power_w: 420              # floor mat; logged as 420 W while the thermostat heats
 
 # IKEA DIRIGERA hub (local API; token in secrets.yaml → dirigera). Sensors and doors are matched by their name in
 # the IKEA Home app. Check with: python -m maska_heat.probe dirigera

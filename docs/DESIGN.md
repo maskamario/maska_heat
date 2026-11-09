@@ -186,7 +186,7 @@ The adapter is **read-only** (`writable=False`): the zone shows "Logging only" a
 whatever mode is stored. Open question for the logged data: whether `temp_current` is the air or the controlled
 (floor) temperature — on 2026-11-09 it read 27.0 °C with the floor at 28.0 °C, setpoint 27.0 °C, still heating.
 Next: learn the floor's heating and cooling rates, then control by **floor** temperature (`kind="floor"`), with
-its own modes (§5.3) and a mold-prevention minimum. Rated power of the floor mat still unknown (for energy estimates).
+its own modes (§5.3) and a mold-prevention minimum. Floor mat 420 W: power is logged as 420 W while `Heating_state` is on, 0 W otherwise.
 
 ---
 
