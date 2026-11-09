@@ -15,7 +15,7 @@ class DeviceError(RuntimeError):
 
 @dataclass(frozen=True)
 class Capabilities:
-    kind: Literal["resistive", "heat_pump", "floor"]
+    kind: Literal["resistive", "heat_pump", "floor", "water_heater"]
     setpoint_min: float
     setpoint_max: float
     setpoint_step: float
@@ -40,6 +40,7 @@ class DeviceState:
     energy_kwh: float | None = None
     mode: str | None = None  # operating mode as the device reports it
     floor_temp: float | None = None  # floor sensor of a floor heating thermostat
+    level_pct: float | None = None  # water heater: hot water left (state of charge)
     online: bool = True
     raw: dict[str, Any] = field(default_factory=dict)
 

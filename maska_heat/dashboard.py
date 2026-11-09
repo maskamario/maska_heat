@@ -23,6 +23,7 @@ class ZoneView:
     humidity: float | None
     setpoint: float | None
     floor_temp: float | None
+    level_pct: float | None
     power_on: bool | None
     is_heating: bool | None
     power_w: float | None
@@ -78,6 +79,7 @@ def zone_views(settings: Settings, db: Database, now: float) -> list[ZoneView]:
                 humidity=humidity,
                 setpoint=dev["setpoint"] if dev else None,
                 floor_temp=dev["floor_temp"] if dev else None,
+                level_pct=dev["level_pct"] if dev else None,
                 power_on=flag("power_on"),
                 is_heating=flag("is_heating"),
                 power_w=dev["power_w"] if dev else None,

@@ -7,6 +7,7 @@
     python -m maska_heat.probe melcloud [--set 21] [--energy 35]
     python -m maska_heat.probe sensor living [--seconds 20]
     python -m maska_heat.probe dirigera [--host 192.168.1.30]
+    python -m maska_heat.probe cozytouch
     python -m maska_heat.probe tuya [bathroom2_floor] [--host 192.168.1.15]
 
 Reads are always safe. Anything that changes a device needs an explicit flag.
@@ -224,6 +225,23 @@ async def probe_tuya(cfg: dict, secrets: dict, args) -> None:
     print("  data points: " + " ".join(f"{dp}={v!r}" for dp, v in sorted(s.raw.items(), key=lambda kv: int(kv[0]))))
 
 
+async def probe_cozytouch(cfg: dict, secrets: dict, args) -> None:
+    """Read-only: the Cozytouch water heater's state and all its raw capability values."""
+    from .adapters.cozytouch import CozytouchWaterHeaterAdapter
+
+    dev = next((d for d in (cfg.get("devices") or {}).values() if d.get("type") == "cozytouch"), {})
+    email, password = require(secrets.get("cozytouch") or {}, "email", "password", where="secrets.yaml → cozytouch")
+    cz = CozytouchWaterHeaterAdapter(email, password, device_name=dev.get("device_name"))
+    try:
+        s = await cz.read()
+    finally:
+        await cz.aclose()
+    _print_state(f"Cozytouch {s.raw['name']}", s, raw=False)
+    print(f"  hot water : {s.level_pct} % ({s.raw['v40_litres']} l of 40 °C water)")
+    caps = s.raw["capabilities"]
+    print("  capabilities: " + " ".join(f"{k}={v!r}" for k, v in sorted(caps.items()) if len(str(v)) < 30))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="maska-probe", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="target", required=True)
@@ -245,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--seconds", type=float, default=20)
     dg = sub.add_parser("dirigera")
     dg.add_argument("--host", help="override dirigera host from config.yaml")
+    sub.add_parser("cozytouch")
     t = sub.add_parser("tuya")
     t.add_argument("name", nargs="?", help="device name in config.yaml (default: the first tuya_thermostat)")
     t.add_argument("--host", help="override host from config.yaml")
@@ -265,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
             coro = probe_melcloud(cfg, secrets, args)
         elif args.target == "dirigera":
             coro = probe_dirigera(cfg, secrets, args)
+        elif args.target == "cozytouch":
+            coro = probe_cozytouch(cfg, secrets, args)
         elif args.target == "tuya":
             coro = probe_tuya(cfg, secrets, args)
         else:

@@ -66,6 +66,13 @@ def build_adapter(name: str, cfg: DeviceSettings, secrets: dict[str, Any]) -> De
         if not key:
             raise ValueError(f"device {name}: local key missing in secrets.yaml → tuya → {name}")
         return TuyaThermostatAdapter(cfg.device_id, cfg.host, key, version=cfg.protocol)
+    if cfg.type == "cozytouch":
+        from .adapters.cozytouch import CozytouchWaterHeaterAdapter
+
+        cz = secrets.get("cozytouch") or {}
+        if not cz.get("email") or not cz.get("password"):
+            raise ValueError(f"device {name}: cozytouch email/password missing in secrets.yaml")
+        return CozytouchWaterHeaterAdapter(cz["email"], cz["password"], device_name=cfg.device_name)
     raise ValueError(f"device {name}: unknown type {cfg.type}")
 
 
@@ -150,7 +157,7 @@ class Collector:
             [
                 Reading(
                     int(time.time()), source, s.room_temp, s.setpoint, s.power_on, s.is_heating, power_w, s.energy_kwh,
-                    mode=s.mode, floor_temp=s.floor_temp,
+                    mode=s.mode, floor_temp=s.floor_temp, level_pct=s.level_pct,
                 )
             ]
         )

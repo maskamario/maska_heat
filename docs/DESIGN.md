@@ -55,6 +55,7 @@ ABIRUUM 1 is now bathroom 2, the two-circle symbol beside it is the wood cooksto
 | **Hall** (upstairs, between kids' rooms) | none — passive | Gets heat from neighbouring zones and up the open stair; the masonry heater's chimney passes through it but adds little heat. Sensor planned (§3.6) |
 | **Bathroom 2** (ground floor, 4.6 m², former ABIRUUM 1) | Electric floor heating, **Heatline HL-05** Wi-Fi thermostat (Tuya / Smart Life, = Hysen HY511WE) — **logged only** since 2026-11-09, not controlled yet (§3.5) | Next to the wood cookstove |
 | **Bathroom 1** (ground floor, 8.4 m² + sauna) | Floor heating + thermostat — **deferred**, design hook only (§3.5) | Sauna |
+| **Hot water** (not a room) | Thermor Onix Connect 80 l electric water heater, 2250 W, Cozytouch — **logged only** since 2026-11-09 (§3.7) | — |
 
 ### 1.1 Open doors and coupled spaces
 
@@ -260,6 +261,38 @@ monitoring, later bathroom drying logic).
 
 If the Mitsubishi runs in Manual mode (§3.4 level 3), the living-area sensor still lets the app learn, plan, and
 send meaningful setpoint instructions.
+
+### 3.7 Hot water — Thermor Onix Connect (Cozytouch), logging only
+80 l electric water heater, 2250 W (`ONIX CONNECT MP 080 S 2250W`, own Wi-Fi module). It is on Atlantic's newer
+Cozytouch platform ("Magellan" API, `apis.groupe-atlantic.com`), **not** on Overkiz — pyoverkiz logs in but the
+Overkiz server answers "no such user". `adapters/cozytouch.py` talks to it directly with httpx, like the current
+Cozytouch app: `POST /users/token` (password grant, username `GA-PRIVATEPERSON/<email>`, the app's public client
+id; token valid 8 h) → `GET /magellan/cozytouch/setupviewv2` (setup with devices and their capability values;
+the setup also holds the home address, which is never stored). Polled every 5 min; the account's `rateLimit` is 30.
+Check with `python -m maska_heat.probe cozytouch`.
+
+Capabilities used (names from `GET /magellan/productmodels/capabilities`):
+
+| Id | Name | Use |
+|---|---|---|
+| 265 | DHW_tWaterTankMiddle | water temperature → `readings.temp` |
+| 22 | DHW_WaterSetpoint | setpoint (50–70 °C) |
+| 271 / 268 | DHW_rV40StateOfChargeHMI / DHW_vV40TankRemaining | hot water left, % → `readings.level_pct` / litres of 40 °C water |
+| 281 | DHW_bWaterHeatReq | heating now → `readings.is_heating`; logged at 2250 W while on |
+| 278 | DHW_pwrElecTankEstimation | power estimate, W (reads 0 when idle) |
+| 288 | DHW_stWaterHeaterServiceStatus | Off / OffAntifrost / On / OnReduced → `power_on` |
+| 87 | DHW_TemperatureSetpointMode | Constant / Eco-comfort schedule / **Automatic** (learns use) / Milestone schedule |
+| 230 | DHW_stOperatingRangeMode | **Heat_Permanently** / Heat_Schedule / Heat_OffPeak / Heat_SelfConsumption — writable |
+| 245–251 | DHW_TimeSlotScheduleMonday…Sunday | heating slots in minutes, up to 3 per day — writable |
+| 165 / 227 | DHW_BoostOn / DHW_stAwayModeStatus | boost, away mode — writable |
+
+On 2026-11-09: 67.8 °C, setpoint 70 °C, 91 % (125 l), Automatic + **Heat_Permanently** (heats whenever needed,
+also at expensive daytime hours). A saved but inactive schedule allows 00:00–06:00 and 22:00–24:00.
+Daily consumption (`/magellan/setups/<id>/consumptions?periodicity=daily|monthly`) only gives **hot water litres**
+for the current day, no electricity — energy is estimated from the heating state instead.
+
+Read-only for now. Later: a planned price-aware schedule — write the day's cheapest slots (§10) into the time-slot
+schedule with Heat_Schedule, keeping enough hot water (state of charge) for the morning and evening use the log shows.
 
 ## 4. Electricity cost
 

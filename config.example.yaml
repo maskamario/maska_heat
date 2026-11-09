@@ -48,6 +48,10 @@ devices:
     device_id: ""             # Tuya device id (python -m tinytuya scan); local key in secrets.yaml → tuya
     protocol: 3.5
     power_w: 420              # floor mat; logged as 420 W while the thermostat heats
+  water_heater:
+    type: cozytouch           # Thermor Onix Connect 80 l; logged only, not controlled
+    device_name: null         # Cozytouch device name; null = first water heater on the account
+    power_w: 2250             # logged as 2250 W while it heats (unless Cozytouch reports power)
 
 # IKEA DIRIGERA hub (local API; token in secrets.yaml → dirigera). Sensors and doors are matched by their name in
 # the IKEA Home app. Check with: python -m maska_heat.probe dirigera
@@ -89,6 +93,9 @@ zones:
   bathroom2:
     name: Bathroom 2
     device: bathroom2_floor
+  hot_water:
+    name: Hot water
+    device: water_heater
 
 notify:
   enabled: true

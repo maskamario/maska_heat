@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 
 from .config import ROOT, load_config
 
-DEFAULT_POLL_SECONDS = {"mill_local": 60, "adax_cloud": 300, "melcloud": 300, "tuya_thermostat": 60}
+DEFAULT_POLL_SECONDS = {"mill_local": 60, "adax_cloud": 300, "melcloud": 300, "tuya_thermostat": 60, "cozytouch": 300}
 
 
 class Location(BaseModel):
@@ -52,11 +52,11 @@ class TariffSettings(BaseModel):
 
 
 class DeviceSettings(BaseModel):
-    type: Literal["mill_local", "adax_cloud", "melcloud", "tuya_thermostat"]
+    type: Literal["mill_local", "adax_cloud", "melcloud", "tuya_thermostat", "cozytouch"]
     enabled: bool = True
     host: str | None = None
     room_name: str | None = None
-    device_name: str | None = None
+    device_name: str | None = None  # melcloud / cozytouch: device name in the app; null = first one
     device_id: str | None = None  # tuya: device id (local key in secrets.yaml → tuya → <device name>)
     protocol: float = 3.5  # tuya: local protocol version
     poll_seconds: int | None = None
