@@ -132,7 +132,7 @@ def test_cards_show_room_target(settings, db):
         page = client.get("/control").text
         assert "Heater set to 17.0 °C" in page and "3.1 °C lower than the room" in page
         page = client.get("/").text  # the dashboard shows the room target and how the room is doing
-        assert "Target</dt><dd>20.0" in page and "2.0° warmer than target 20.0" in page
+        assert "Target</dt><dd>20.0" in page and "Cooling down to 20.0" in page
 
 
 def test_manual_starts_from_the_room_equivalent(settings, db):

@@ -171,6 +171,7 @@ a.stat:hover { border-color: var(--muted); }
 .tone-ok { color: var(--moss); }
 .tone-cool { color: var(--frost); }
 .tone-warm { color: var(--ochre); }
+.tone-cooling { color: var(--muted); }
 .tone-paused { color: var(--ochre); }
 .zone dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 0; font-size: 14px; }
 .zone dt { color: var(--muted); font-size: var(--fs-label); }

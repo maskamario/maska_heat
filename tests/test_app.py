@@ -197,7 +197,8 @@ def test_verdict_lines():
     assert verdict(view(21.3), 21.0) == ("On target", "ok")  # exactly 0.3 off, despite float rounding
     assert verdict(view(20.6), 22.0)[0].startswith("1.4° cooler than target 22.0")
     assert verdict(view(20.6, is_heating=True), 22.0)[0].startswith("Warming up to 22.0")
-    assert verdict(view(23.0), 22.0)[1] == "warm"
+    assert verdict(view(21.6), 19.0) == ("Cooling down to 19.0 °C", "cooling")  # Night started, heater off
+    assert verdict(view(23.0, is_heating=True), 22.0)[1] == "warm"  # above target and still heating
     assert verdict(view(19.0), 22.0, paused_until="19:00") == ("Paused for the price spike until 19:00", "paused")
     assert verdict(view(19.0, stale=True), 22.0) is None
     assert verdict(view(68.0, level_pct=92), 22.0) is None  # hot water: no room verdict

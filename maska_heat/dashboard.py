@@ -190,7 +190,7 @@ ON_TARGET_FLOOR = 0.5  # a floor thermostat swings more around its setpoint
 def verdict(
     view: ZoneView, target: float | None, paused_until: str | None = None, preheating: bool = False
 ) -> tuple[str, str] | None:
-    """One plain-language line under a room's temperature, and its state ("ok", "cool", "warm", "paused").
+    """One plain-language line under a room's temperature, and its state ("ok", "cool", "warm", "cooling", "paused").
 
     `target` is the room temperature aimed at (or the heater's setpoint where the heater's sensor is the room's);
     `paused_until` the end time ("19:00") while a price spike pauses the zone; `preheating` when the target is
@@ -209,4 +209,6 @@ def verdict(
         if view.is_heating:
             return f"Warming up to {target:.1f} °C", "cool"
         return f"{-diff:.1f}° cooler than target {target:.1f} °C", "cool"
-    return f"{diff:.1f}° warmer than target {target:.1f} °C", "warm"
+    if view.is_heating:  # above target and still heating: worth a look
+        return f"{diff:.1f}° warmer than target {target:.1f} °C", "warm"
+    return f"Cooling down to {target:.1f} °C", "cooling"  # e.g. after Night starts: expected, not a problem
