@@ -107,6 +107,11 @@ class ZoneSettings(BaseModel):
     # current gap between its own sensor and the room sensor. "heater": targets go to the heater as they are.
     control_by: Literal["heater", "room"] = "heater"
 
+    @property
+    def room_sensor(self) -> str | None:
+        """The room sensor source ("sensor:<name>") a room-controlled zone follows."""
+        return next((s for s in self.temp_sources if s.startswith("sensor:")), None)
+
 
 class HotWaterSettings(BaseModel):
     """Price-aware water heater (Cozytouch): heats only in the day's cheapest hours (maska_heat/hotwater.py)."""

@@ -62,46 +62,46 @@ def _temp(row) -> tuple[float | None, str]:
 
 
 def zone_views(settings: Settings, db: Database, now: float) -> list[ZoneView]:
-    views = []
-    for key, zone in settings.zones.items():
-        temp = humidity = temp_source = updated = None
-        temp_kind = "air"
-        stale = True
-        for source in zone.temp_sources:
-            row = db.latest_reading(source)
-            if row and _temp(row)[0] is not None and now - row["ts"] <= _stale_after(settings, source):
-                (temp, temp_kind), humidity, temp_source, updated, stale = _temp(row), row["humidity"], source, row["ts"], False
-                break
-        enabled = bool(zone.device) and settings.devices[zone.device].enabled
-        dev = db.latest_reading(f"device:{zone.device}") if zone.device else None
-        dev_fresh = bool(dev) and now - dev["ts"] <= _stale_after(settings, f"device:{zone.device}")
-        if temp is None and dev and _temp(dev)[0] is not None:  # show last known value, marked stale
-            (temp, temp_kind), temp_source, updated = _temp(dev), f"device:{zone.device}", dev["ts"]
+    return [zone_view(settings, db, key, now) for key in settings.zones]
 
-        def flag(col: str) -> bool | None:
-            return None if not dev or dev[col] is None else bool(dev[col])
 
-        views.append(
-            ZoneView(
-                key=key,
-                name=zone.name,
-                temp=temp,
-                temp_source=temp_source,
-                temp_kind=temp_kind,
-                humidity=humidity,
-                setpoint=dev["setpoint"] if dev else None,
-                floor_temp=dev["floor_temp"] if dev else None,
-                level_pct=dev["level_pct"] if dev else None,
-                power_on=flag("power_on"),
-                is_heating=flag("is_heating"),
-                power_w=dev["power_w"] if dev else None,
-                updated_at=updated,
-                stale=stale,
-                device_online=dev_fresh if enabled else None,
-                device_enabled=enabled,
-            )
-        )
-    return views
+def zone_view(settings: Settings, db: Database, key: str, now: float) -> ZoneView:
+    zone = settings.zones[key]
+    temp = humidity = temp_source = updated = None
+    temp_kind = "air"
+    stale = True
+    for source in zone.temp_sources:
+        row = db.latest_reading(source)
+        if row and _temp(row)[0] is not None and now - row["ts"] <= _stale_after(settings, source):
+            (temp, temp_kind), humidity, temp_source, updated, stale = _temp(row), row["humidity"], source, row["ts"], False
+            break
+    enabled = bool(zone.device) and settings.devices[zone.device].enabled
+    dev = db.latest_reading(f"device:{zone.device}") if zone.device else None
+    dev_fresh = bool(dev) and now - dev["ts"] <= _stale_after(settings, f"device:{zone.device}")
+    if temp is None and dev and _temp(dev)[0] is not None:  # show last known value, marked stale
+        (temp, temp_kind), temp_source, updated = _temp(dev), f"device:{zone.device}", dev["ts"]
+
+    def flag(col: str) -> bool | None:
+        return None if not dev or dev[col] is None else bool(dev[col])
+
+    return ZoneView(
+        key=key,
+        name=zone.name,
+        temp=temp,
+        temp_source=temp_source,
+        temp_kind=temp_kind,
+        humidity=humidity,
+        setpoint=dev["setpoint"] if dev else None,
+        floor_temp=dev["floor_temp"] if dev else None,
+        level_pct=dev["level_pct"] if dev else None,
+        power_on=flag("power_on"),
+        is_heating=flag("is_heating"),
+        power_w=dev["power_w"] if dev else None,
+        updated_at=updated,
+        stale=stale,
+        device_online=dev_fresh if enabled else None,
+        device_enabled=enabled,
+    )
 
 
 def price_slots(settings: Settings, db: Database, since: datetime, until: datetime, now: float) -> list[PriceSlot]:

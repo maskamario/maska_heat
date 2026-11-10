@@ -129,7 +129,7 @@ async def test_floor_paused_and_restored_and_notified(s, db):
         sent.append((a, k))
         return True
 
-    notifier = Notifier(s.notify, None, db, TZ)
+    notifier = Notifier(s.notify.model_copy(update={"enabled": True}), "test-topic", db, TZ)
     notifier.send = send
     changes = []
     ctl = spikes.SpikeController(s, db, {"bathroom2_floor": floor}, notifier, lambda: changes.append(1))
@@ -176,6 +176,8 @@ def test_dashboard_notice_and_override(s, db):
     day = datetime.fromtimestamp(now, TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     db.upsert_prices([(int((day + timedelta(hours=h)).timestamp()), 60, float(SPOT[h % 24])) for h in range(48)])
     with TestClient(app) as client:
+        assert "nothing pauses" in client.get("/").text or not spikes.next_or_active(s, db, now)  # all Hands-off
+        app.state.store.set_zone("madli", ZoneControl(mode="smart"))
         page = client.get("/").text
         upcoming = spikes.next_or_active(s, db, now)
         if upcoming:
@@ -186,3 +188,82 @@ def test_dashboard_notice_and_override(s, db):
             client.post(f"/spike/{upcoming.start}/resume")
             assert not spikes.overridden(db, upcoming)
         assert client.post("/spike/123/override").status_code == 404
+
+
+class Phone:
+    """A notifier whose sends succeed or fail on demand."""
+
+    def __init__(self, s, db, ok=True):
+        self.inner = Notifier(s.notify, "test-topic", db, TZ)
+        self.ok, self.sent = ok, []
+        self.available = True
+
+    def in_quiet_hours(self, now=None):
+        return self.inner.in_quiet_hours(now)
+
+    async def send(self, kind, title, message, **kw):
+        self.sent.append(message)
+        return self.ok
+
+
+async def test_warning_waits_for_quiet_hours_to_end(settings, db):
+    """A 07:00 spike: the warning is due at 06:00 (quiet hours) and goes out at 06:30 instead of never."""
+    spot = [150] * 48
+    spot[7] = spot[31] = 500
+    db.upsert_prices([(int(at(h)), 60, float(spot[h])) for h in range(48)])
+    s = spike_settings(settings)
+    phone = Phone(s, db)
+    ctl = spikes.SpikeController(s, db, {}, phone)
+    await ctl.run(at(6.1))
+    assert phone.sent == []
+    await ctl.run(at(6.51))
+    await ctl.run(at(6.6))
+    assert len(phone.sent) == 1 and "07:00–08:00" in phone.sent[0]
+
+
+async def test_failed_warning_is_retried(s, db):
+    phone = Phone(s, db, ok=False)
+    ctl = spikes.SpikeController(s, db, {}, phone)
+    await ctl.run(at(15.2))
+    await ctl.run(at(15.25))  # 3 min later: not yet again
+    assert len(phone.sent) == 1
+    phone.ok = True
+    await ctl.run(at(15.3))
+    await ctl.run(at(15.4))
+    assert len(phone.sent) == 2
+
+
+async def test_warning_lists_only_zones_that_pause(s, db):
+    store = ControlStore(db, [])
+    store.set_zone("madli", ZoneControl(mode="smart"))
+    store.set_zone("matis", ZoneControl(mode="manual", manual_setpoint=21))
+    floor = FakeHeater("floor")
+    phone = Phone(s, db)
+    ctl = spikes.SpikeController(s, db, {"bathroom2_floor": floor}, phone, store=store)
+    await ctl.run(at(15.2))
+    msg = phone.sent[0]
+    assert "Madli" in msg and "Bathroom 2" in msg  # Smart room and the logged-only floor
+    assert "Matis" not in msg and "Hot water" not in msg  # Manual keeps heating; the water heater is Hands-off
+
+
+async def test_a_failing_part_does_not_stop_the_rest(s, db):
+    changes = []
+    ctl = spikes.SpikeController(s, db, {}, Phone(s, db), lambda: changes.append(1))
+
+    async def broken(now):
+        raise RuntimeError("ntfy exploded")
+
+    ctl._notify = broken
+    await ctl.run(at(16.5))
+    assert changes  # the other controllers were still told that the spike started
+
+
+def test_safety_heating_has_hysteresis(s, db):
+    ex, store = executor(s, db)
+    room(db, "madli_adax", 17.9, at(16.2))
+    assert ex.decide("madli", now=at(16.2)).safety
+    ex._safety.add("madli")  # as _apply does
+    room(db, "madli_adax", 18.2, at(16.3))
+    assert ex.decide("madli", now=at(16.3)).safety  # just above the limit: keeps heating
+    room(db, "madli_adax", 18.6, at(16.4))
+    assert not ex.decide("madli", now=at(16.4)).safety

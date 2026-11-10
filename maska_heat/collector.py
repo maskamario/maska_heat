@@ -5,16 +5,16 @@ Read-only — nothing here ever writes to a heating device.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Awaitable, Callable
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from .adapters.base import DeviceAdapter
 from .db import Database, Reading
+from .jobs import Jobs
 from .notify import Notifier
 from .providers.prices import fetch_prices
 from .providers.weather import fetch_forecast
@@ -95,7 +95,7 @@ class Collector:
         self.sensors: dict[str, EsphomeSensor | DirigeraSensor] = {}
         self.dirigera: DirigeraPoller | None = None
         self.health: dict[str, SourceHealth] = {}
-        self._tasks: list[asyncio.Task] = []
+        self.jobs = Jobs()
         self._energy_done: set[tuple[str, date]] = set()  # past days whose energy report is stored
         now = time.time()
 
@@ -281,8 +281,9 @@ class Collector:
         if h.failing:
             self.db.add_event("info", source, f"{h.label} is answering again")
             if h.alerted:
-                asyncio.get_running_loop().create_task(
-                    self.notifier.send("online", f"{h.label} back online", f"{h.label} is answering again", tags="white_check_mark")
+                self.jobs.spawn(
+                    self.notifier.send("online", f"{h.label} back online", f"{h.label} is answering again", tags="white_check_mark"),
+                    "notify:online",
                 )
         h.last_ok, h.failing, h.last_error, h.alerted = time.time(), False, None, False
 
@@ -297,41 +298,27 @@ class Collector:
     # lifecycle ----------------------------------------------------------------
 
     def start(self) -> None:
-        def every(seconds: float, job: Callable[[], Awaitable[None]], name: str) -> asyncio.Task:
-            async def loop() -> None:
-                while True:
-                    try:
-                        await job()
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        log.exception("job %s crashed", name)
-                    await asyncio.sleep(seconds)
-
-            return asyncio.create_task(loop(), name=name)
-
+        every = self.jobs.every
         for name, cfg in self.settings.devices.items():
             if name in self.devices:
-                self._tasks.append(every(cfg.interval, lambda n=name: self.poll_device(n), f"poll:{name}"))
+                every(cfg.interval, lambda n=name: self.poll_device(n), f"poll:{name}")
         for name, sensor in self.sensors.items():
             if isinstance(sensor, EsphomeSensor):
-                self._tasks.append(asyncio.create_task(sensor.run(), name=f"sensor:{name}"))
+                self.jobs.spawn(sensor.run(), f"sensor:{name}")
         if self.dirigera:
-            self._tasks.append(every(self.dirigera.interval, self.poll_dirigera, "dirigera"))
+            every(self.dirigera.interval, self.poll_dirigera, "dirigera")
         if self.sensors:
-            self._tasks.append(every(SENSOR_LOG_SECONDS, self.log_sensors, "log_sensors"))
-        self._tasks.append(every(PRICE_CHECK_SECONDS, self.update_prices, "prices"))
-        self._tasks.append(every(WEATHER_SECONDS, self.update_weather, "weather"))
-        self._tasks.append(every(HEALTH_SECONDS, self.check_health, "health"))
+            every(SENSOR_LOG_SECONDS, self.log_sensors, "log_sensors")
+        every(PRICE_CHECK_SECONDS, self.update_prices, "prices")
+        every(WEATHER_SECONDS, self.update_weather, "weather")
+        every(HEALTH_SECONDS, self.check_health, "health")
         if any(hasattr(a, "energy_days") for a in self.devices.values()):
-            self._tasks.append(every(ENERGY_SECONDS, self.update_energy, "energy"))
+            every(ENERGY_SECONDS, self.update_energy, "energy")
         doors = len(self.dirigera.doors) if self.dirigera else 0
         self.db.add_event("info", "app", f"started: {len(self.devices)} devices, {len(self.sensors)} sensors, {doors} doors")
 
     async def stop(self) -> None:
-        for t in self._tasks:
-            t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.jobs.stop()
         for adapter in self.devices.values():
             close = getattr(adapter, "aclose", None)
             if close:

@@ -53,6 +53,20 @@ def test_plan_merges_to_three_windows():
     assert len(w) <= 3 and total(w) >= 6
 
 
+def test_plan_never_merges_across_a_spike():
+    """The bug: merging windows counted the (removed) spike hours as free, so a 03:00 spike got heated through."""
+    p = [0.30 if h % 2 else 0.05 for h in range(24)]
+    spike = {3 * 60}
+    w = plan_day(hours(p), RULES, avoid=spike)
+    assert len(w) <= 3
+    assert not any(a <= 180 < b for a, b in w)
+    p = [0.30] * 24
+    for h in (0, 1, 2, 4, 5, 13, 20):  # cheap on both sides of a 03:00 and an 18:00 spike
+        p[h] = 0.02
+    w = plan_day(hours(p), HotWaterRules(hours_per_day=7, morning_hours=5), avoid={180, 18 * 60})
+    assert len(w) <= 3 and not any(a <= m < b for a, b in w for m in (180, 18 * 60))
+
+
 def test_plan_night_when_night_is_cheapest():
     p = [0.05] * 7 + [0.30] * 17
     p[14] = 0.2  # cheapest afternoon hour

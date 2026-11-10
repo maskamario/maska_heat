@@ -28,6 +28,8 @@
   {% if spike.overridden %}
     Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — <strong>heating normally</strong> (overridden).
     <button type="button" hx-post="/spike/{{ spike.start }}/resume">Pause again</button>
+  {% elif not spike.zones %}
+    Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — nothing pauses: the zones are in Manual or Hands-off.
   {% else %}
     ⚡ Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — {{ "paused now" if spike.active else "will pause" }}: {{ spike.zones }}.
     <button type="button" hx-post="/spike/{{ spike.start }}/override">Keep heating</button>

@@ -68,12 +68,34 @@ def test_deadband_keeps_current_heater_setpoint(rig):
     assert ex.decide("madli", now=NOW).setpoint == 17.0
 
 
-def test_fallback_without_room_sensor(rig):
+def test_never_sends_a_room_target_unshifted(rig):
+    """No room sensor and no known gap: the heater is left alone (sending 20 would heat the room to ~23)."""
     ex, store, db = rig
-    db.add_readings([Reading(NOW - 60, "device:madli_adax", temp=19.0, setpoint=20.0, power_on=True)])
+    db.add_readings([Reading(NOW - 60, "device:madli_adax", temp=19.0, setpoint=17.0, power_on=True)])
     store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
     d = ex.decide("madli", now=NOW)
-    assert d.setpoint == 20.0 and d.room_target is None and "heater's own sensor" in d.label
+    assert d.setpoint is None and d.room_target == 20.0 and "gap is unknown" in d.blocked
+
+
+def test_room_sensor_silent_uses_last_known_gap(rig):
+    ex, store, db = rig
+    history(db, room=22.0, heater=18.9)
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
+    assert ex.decide("madli", now=NOW).setpoint == 17.0  # gap −3.1 measured and remembered
+    later = NOW + 2 * 3600
+    db.add_readings([Reading(later - 60, "device:madli_adax", temp=17.0, setpoint=17.0, power_on=True)])
+    d = ex.decide("madli", now=later)  # the room sensor has been silent for two hours
+    assert d.setpoint == 17.0 and d.offset == pytest.approx(-3.1) and not d.learn and "last known gap" in d.label
+    assert ex.room_estimate("madli", later) == pytest.approx(20.1)  # heater 17.0 corrected by the gap
+    db.add_readings([Reading(later + 86400, "device:madli_adax", temp=17.0, setpoint=17.0, power_on=True)])
+    assert ex.decide("madli", now=later + 86400 + 60).setpoint is None  # a day later the gap is too old to trust
+
+
+def test_room_equivalent_of_heater_setpoint(rig):
+    ex, store, db = rig
+    history(db, room=22.0, heater=18.9)
+    assert ex.room_equivalent("madli", 17.0, now=NOW) == 20.0
+    assert ex.room_equivalent("matis", 19.5, now=NOW) == 19.5  # heater-controlled zone: as it is
 
 
 def test_smart_target_is_translated(rig):
@@ -110,6 +132,17 @@ def test_cards_show_room_target(settings, db):
         page = client.get("/control").text
         assert "Heater set to 17.0 °C" in page and "3.1 °C lower than the room" in page
         assert "(heater 17)" in client.get("/").text
+
+
+def test_manual_starts_from_the_room_equivalent(settings, db):
+    """Madli's heater at 17 with the room at 20: Manual must start at 20 (room), not 17 (which would become ~14)."""
+    s = room_settings(settings)
+    now = int(time.time())
+    history(db, room=20.0, heater=16.9, setpoint=17.0, end=now)
+    app = create_app(s, {"adax": {"account_id": "1", "api_secret": "x"}}, start_jobs=False, db=db)
+    with TestClient(app) as client:
+        client.post("/control/madli/mode", data={"mode": "manual"})
+        assert app.state.store.zone("madli").manual_setpoint == 20.0
 
 
 def test_feedback_raises_heater_when_room_stays_low(rig):

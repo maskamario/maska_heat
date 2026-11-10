@@ -15,7 +15,6 @@ dashboard) lets the spike pass with normal heating.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time as _time
@@ -24,6 +23,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .db import Database
+from .jobs import Jobs
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ OVERRIDES_KEY = "spike_overrides"
 NOTIFIED_KEY = "spike_notified"
 FLOOR_KEY = "spike_floor"
 RUN_SECONDS = 60
+RETRY_SECONDS = 5 * 60  # a failed spike warning is sent again after this
 MIN_HOURS_FOR_DAY = 23
 
 
@@ -133,6 +134,25 @@ def preheating(settings: Settings, db: Database, zone: str, now: float) -> Spike
     return s if price is not None and price < s.threshold else None
 
 
+def paused_zones(settings: Settings, store, devices: dict) -> list[str]:
+    """The spike.zones a spike actually pauses with their current modes: rooms and the water heater only in Smart
+    (Manual keeps its temperature, Hands-off is left alone); a logged-only floor thermostat always."""
+    out = []
+    for key in settings.spike.zones if settings.spike else []:
+        zone = settings.zones.get(key)
+        if zone is None:
+            continue
+        adapter = devices.get(zone.device) if zone.device else None
+        if (adapter is not None and _spike_floor(adapter)) or store.zone(key).mode == "smart":
+            out.append(key)
+    return out
+
+
+def _spike_floor(adapter) -> bool:
+    """A floor thermostat the app does not control otherwise: the spike controller pauses it itself."""
+    return adapter.capabilities.kind == "floor" and not adapter.capabilities.writable
+
+
 def spike_hours(settings: Settings, db: Database, day: date) -> set[int]:
     """Start minutes (local) of the day's spike hours that are not overridden — the water heater avoids them."""
     tz = ZoneInfo(settings.location.timezone)
@@ -150,31 +170,42 @@ class SpikeController:
     """Every minute: warn before a spike, pause/restore the floor thermostat, and nudge the other controllers when a
     spike starts or ends so they react right away."""
 
-    def __init__(self, settings: Settings, db: Database, devices: dict, notifier, on_change=None):
+    def __init__(self, settings: Settings, db: Database, devices: dict, notifier, on_change=None, store=None):
         self.settings = settings
         self.cfg = settings.spike
         self.db = db
         self.devices = devices
         self.notifier = notifier
+        self.store = store
         self.on_change = on_change or (lambda: None)
         self.tz = ZoneInfo(settings.location.timezone)
         self._last: tuple[int, bool] | None = None
-        self._task: asyncio.Task | None = None
+        self._announced: set[int] = set()  # spikes already written to the events
+        self._tried: dict[int, float] = {}  # spike start -> last failed send
+        self.jobs = Jobs()
+
+    def _paused(self) -> list[str]:
+        if self.store is None:
+            return [z for z in self.cfg.zones if z in self.settings.zones]
+        return paused_zones(self.settings, self.store, self.devices)
 
     def _names(self) -> str:
-        return ", ".join(self.settings.zones[z].name for z in self.cfg.zones if z in self.settings.zones)
+        return ", ".join(self.settings.zones[z].name for z in self._paused())
 
     def _event(self, message: str, level: str = "info") -> None:
         self.db.add_event(level, "spike", message)
 
     async def run(self, now: float | None = None) -> None:
+        """One round; each part on its own, so a failing notification never stops the floor being restored."""
         now = now or _time.time()
-        try:
-            await self._notify(now)
-            await self._floors(now)
-        except Exception as e:
-            log.warning("spike control failed: %s", e)
-            self._event(f"{type(e).__name__}: {e}", "warning")
+        for part in (self._notify, self._floors, self._nudge):
+            try:
+                await part(now)
+            except Exception as e:
+                log.warning("spike control failed: %s", e)
+                self._event(f"{type(e).__name__}: {e}", "warning")
+
+    async def _nudge(self, now: float) -> None:
         s = active(self.settings, self.db, now)
         state = (s.start, overridden(self.db, s)) if s else None
         if state != self._last:
@@ -182,15 +213,33 @@ class SpikeController:
             self.on_change()
 
     async def _notify(self, now: float) -> None:
+        """Warn once per spike. Marked as warned only once the message went out: during quiet hours it waits
+        (a 07:00 spike is announced at 06:30, when quiet hours end), and a failed send is retried every 5 min."""
         s = upcoming(self.settings, self.db, now, self.cfg.notify_before_min * 60)
         if not s or overridden(self.db, s):
             return
         notified = set(json.loads(self.db.get_kv(NOTIFIED_KEY) or "[]"))
         if s.start in notified:
             return
-        notified.add(s.start)
-        self.db.set_kv(NOTIFIED_KEY, json.dumps(sorted(t for t in notified if t > now - 3 * 86400)))
-        msg = f"{s.label(self.tz)}, up to {s.peak * 100:.0f} c/kWh. Paused: {self._names()}."
+        names = self._names()
+        if not names:
+            return  # nothing would pause (all in Manual or Hands-off): no point in a "Keep heating" button
+        if s.start not in self._announced:
+            self._announced.add(s.start)
+            self._event(f"price spike {s.label(self.tz)} ahead — {names} will pause")
+
+        def done() -> None:
+            notified.add(s.start)
+            self.db.set_kv(NOTIFIED_KEY, json.dumps(sorted(t for t in notified if t > now - 3 * 86400)))
+
+        if not self.notifier.available:  # ntfy not set up: nothing to wait for
+            done()
+            return
+        if self.notifier.in_quiet_hours(datetime.fromtimestamp(now, self.tz)):
+            return
+        if now - self._tried.get(s.start, 0) < RETRY_SECONDS:
+            return
+        msg = f"{s.label(self.tz)}, up to {s.peak * 100:.0f} c/kWh. Paused: {names}."
         actions = []
         url = self.settings.notify.app_url
         if url:
@@ -199,8 +248,10 @@ class SpikeController:
                 {"action": "http", "label": "Keep heating", "url": f"{base}/spike/{s.start}/override", "method": "POST", "clear": True},
                 {"action": "view", "label": "Open app", "url": f"{base}/"},
             ]
-        self._event(f"price spike {s.label(self.tz)} ahead — {self._names()} will pause")
-        await self.notifier.send("spike", "Price spike — heating pauses", msg, tags="zap", actions=actions)
+        if await self.notifier.send("spike", "Price spike — heating pauses", msg, tags="zap", actions=actions):
+            done()
+        else:
+            self._tried[s.start] = now
 
     async def _floors(self, now: float) -> None:
         """Floor thermostats are not controlled otherwise: lower their setpoint for the spike, then put it back."""
@@ -208,7 +259,7 @@ class SpikeController:
         for zone in self.cfg.zones:
             z = self.settings.zones.get(zone)
             adapter = self.devices.get(z.device) if z and z.device else None
-            if adapter is None or adapter.capabilities.kind != "floor":
+            if adapter is None or not _spike_floor(adapter):
                 continue
             latest = self.db.latest_reading(f"device:{z.device}")
             current = latest["setpoint"] if latest else None
@@ -227,14 +278,7 @@ class SpikeController:
                 self.db.set_kv(FLOOR_KEY, json.dumps(saved))
 
     def start(self) -> None:
-        async def loop() -> None:
-            while True:
-                await self.run()
-                await asyncio.sleep(RUN_SECONDS)
-
-        self._task = asyncio.create_task(loop(), name="spike")
+        self.jobs.every(RUN_SECONDS, self.run, "spike")
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
+        await self.jobs.stop()

@@ -582,15 +582,20 @@ Rule-based, needs no thermal model. A **spike hour** costs ≥ 1.4 × the day's 
 most 3 a day (the most expensive), single-hour gaps between them filled. On 28.10–9.11 this found 1–3 h on most
 days (e.g. 9.11: 16:00–19:00 at up to 50 c/kWh). Zones in `spike.zones` (bedrooms, bathroom floor, hot water — not
 the heat pump) **use no electricity** during a spike unless overridden:
-- Rooms in Smart: setpoint → the heater's minimum (5 °C); a room below `safety_min_temp` (18 °C, room sensor) gets
-  its comfort min instead. The hour before, if cheaper than the spike, they pre-heat to the comfort max.
-  Manual mode is left alone.
+- Rooms in Smart: setpoint → the heater's minimum (5 °C); a room below `safety_min_temp` (18 °C, room sensor —
+  while it is silent, the heater's sensor corrected by the last known gap) gets its comfort min instead, until it is
+  0.5 °C above the limit again (no flip-flopping around 18). The hour before, if cheaper than the spike, they pre-heat
+  to the comfort max. Manual and Hands-off are left alone and are not listed as paused.
 - Floor thermostat (otherwise logged only): setpoint → 5 °C, restored afterwards unless someone changed it meanwhile.
 - Water heater: spike hours are left out of its windows; no boost during a spike.
 
 `notify_before_min` (60) before a spike, an ntfy message lists what pauses, with a **Keep heating** button (HTTP
 POST to `notify.app_url`/spike/<start>/override) and the dashboard shows a banner with the same override / "Pause
-again". The spike job runs every minute and nudges the executor and the water heater at start, end and override.
+again". A spike counts as warned only once the message went out: during quiet hours the warning waits (a 07:00 spike
+is announced at 06:30) and a failed send is retried every 5 min. Nothing to pause (all in Manual / Hands-off) → no
+message. The spike job runs every minute and nudges the executor and the water heater at start, end and override;
+its parts run independently, so one failing never stops the floor restore. The water heater's planner never merges
+two windows across a spike hour (it drops the smallest window instead).
 
 ## 11. Executor & safety
 
@@ -600,15 +605,18 @@ depends on the door: on 9.11 with Madli's door closed the room rose 0.9 °C/h pa
 Adax still saw 18.9 °C. So targets (comfort bands, manual, pre-heat, spike safety) are room temperatures, and the
 heater gets `room target + median(heater sensor − room sensor over 20 min)`, clamped to its range and step; changes
 smaller than ¾ of the step are not sent. At equilibrium the heater holds its own sensor at that setpoint, which puts
-the room on target whatever the door does. Without a fresh room sensor (10 min) or with a gap over 6 °C, the target
-goes to the heater as before. The spike pause (heater minimum) is a heater value and is not shifted.
+the room on target whatever the door does. Without a fresh room sensor (10 min) or with a gap over 6 °C, the last
+measured gap (kv `room_offset`) is used for up to 24 h; after that nothing is sent — a room target is never sent to the
+heater unshifted (Madli would head for ~25 °C). Switching to Manual starts from the room temperature the heater's
+current setpoint amounts to. The spike pause (heater minimum) is a heater value and is not shifted.
 The gap is not constant, though: while the Adax heats, its own sensor reads lower (it draws cold air in at the bottom),
 so on 9.11 the room settled 0.4–0.6 °C below target with the door closed. An integral **trim** fixes the rest: every
 control cycle, `trim += 1.5 × (room target − room mean over 10 min) × hours since last cycle`, capped at ±1.5 °C and kept
 in kv `room_trim_v2`, added to the heater setpoint. It learns only while the room is within 1 °C of the target (no
 wind-up while warming up after a target change), only while the heater can act on the error — "too warm" not while the
 heater is already idle (its sensor > its setpoint + 0.5), "too cold" not while it runs flat out (sensor < setpoint − 0.5)
-— and not during the spike pause or without a room sensor. The first version lacked the idle check: overnight on
+— and only from plain targets on fresh data: not while blocked, not during any spike rule (pause, safety, pre-heat),
+not on the remembered gap. The first version lacked the idle check: overnight on
 9–10.11 the rooms cooled slowly towards the Night target with the heaters off, it learned −2.3/−3.0 °C, and the next day
 held both bedrooms about 2 °C below target; those values were discarded (new kv key).
 

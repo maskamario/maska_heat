@@ -10,6 +10,7 @@ for morning showers) and `evening_hours` between `evening_from` and `evening_by`
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -32,12 +33,13 @@ def _minute(t: time) -> int:
     return t.hour * 60 + t.minute
 
 
-def plan_day(prices: dict[int, float], rules: HotWaterRules) -> list[tuple[int, int]]:
+def plan_day(prices: dict[int, float], rules: HotWaterRules, avoid: set[int] = frozenset()) -> list[tuple[int, int]]:
     """Heating windows (start, end) in minutes since local midnight from {hour start minute: €/kWh}.
 
-    Hours are whole clock hours; a requirement only counts hours that end by its deadline.
+    Hours are whole clock hours; a requirement only counts hours that end by its deadline. Hours in `avoid` (price
+    spikes) are never heated — not even to merge two windows into one.
     """
-    hours = sorted(prices)
+    hours = sorted(h for h in prices if h not in avoid)
     if not hours:
         return []
     chosen: set[int] = set()
@@ -54,12 +56,13 @@ def plan_day(prices: dict[int, float], rules: HotWaterRules) -> list[tuple[int, 
 
     windows = _windows(chosen)
     while len(windows) > MAX_WINDOWS:  # the boiler takes 3 windows a day: fill the cheapest gap
-        gaps = [
-            (sum(prices.get(h, 0.0) for h in range(windows[i][1], windows[i + 1][0], 60)), i)
-            for i in range(len(windows) - 1)
-        ]
-        _, i = min(gaps)
-        chosen.update(range(windows[i][1], windows[i + 1][0], 60))
+        gaps = [(_cost(prices, avoid, range(windows[i][1], windows[i + 1][0], 60)), i) for i in range(len(windows) - 1)]
+        cost, i = min(gaps)
+        if cost == math.inf:  # every gap crosses a spike: give up the smallest, priciest window instead
+            drop = min(windows, key=lambda w: (w[1] - w[0], -_cost(prices, avoid, range(*w, 60))))
+            chosen -= set(range(*drop, 60))
+        else:
+            chosen.update(range(windows[i][1], windows[i + 1][0], 60))
         windows = _windows(chosen)
 
     def ok(hs: set[int]) -> bool:
@@ -72,13 +75,19 @@ def plan_day(prices: dict[int, float], rules: HotWaterRules) -> list[tuple[int, 
     # Filling gaps can overshoot the hours: drop the most expensive window ends while the rules still hold.
     while len(chosen) > rules.hours_per_day:
         ends = {h for a, b in _windows(chosen) for h in (a, b - 60)}
-        for h in sorted(ends, key=lambda h: -prices.get(h, 0.0)):
+        for h in sorted(ends, key=lambda h: -prices.get(h, math.inf)):
             if ok(chosen - {h}):
                 chosen.discard(h)
                 break
         else:
             break
     return _windows(chosen)
+
+
+def _cost(prices: dict[int, float], avoid: set[int], hours: range) -> float:
+    """Price of heating these hours: a spike hour can't be heated (infinite); the hour that does not exist on the
+    spring DST day costs nothing."""
+    return sum(math.inf if h in avoid else prices.get(h, 0.0) for h in hours)
 
 
 def _windows(hours: set[int]) -> list[tuple[int, int]]:
@@ -119,6 +128,7 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import time as _time  # noqa: E402
 
+from .jobs import Jobs  # noqa: E402
 from .adapters.cozytouch import (  # noqa: E402
     CAP_BOOST,
     CAP_RANGE,
@@ -162,7 +172,7 @@ def planned(settings, db, day: date) -> list[tuple[int, int]] | None:
         from .spike import spike_hours
 
         skip = spike_hours(settings, db, day)
-        prices = {m: p for m, p in prices.items() if m not in skip}  # never heat in a price spike
+        return plan_day(prices, rules_from(settings.hot_water), avoid=skip)  # never heat in a price spike
     return plan_day(prices, rules_from(settings.hot_water))
 
 
@@ -178,7 +188,7 @@ class HotWaterController:
         self.notifier = notifier
         self.tz = ZoneInfo(settings.location.timezone)
         self._lock = asyncio.Lock()
-        self._task: asyncio.Task | None = None
+        self.jobs = Jobs()
 
     @property
     def zone(self) -> str:
@@ -274,19 +284,11 @@ class HotWaterController:
         self._event("handed back — the boiler's own mode and schedule restored")
 
     def trigger(self) -> None:
-        asyncio.get_running_loop().create_task(self.run())
+        self.jobs.spawn(self.run(), "hotwater:apply")
 
     def start(self, initial_delay: float = 60.0) -> None:
-        async def loop() -> None:
-            await asyncio.sleep(initial_delay)
-            while True:
-                await self.run()
-                await asyncio.sleep(RUN_SECONDS)
-
-        self._task = asyncio.create_task(loop(), name="hotwater")
+        self.jobs.every(RUN_SECONDS, self.run, "hotwater", initial_delay)
 
     async def stop(self) -> None:
         # Nothing to undo: the boiler keeps following its last schedule while the app is down.
-        if self._task:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
+        await self.jobs.stop()

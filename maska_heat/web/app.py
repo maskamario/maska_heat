@@ -86,7 +86,9 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
                     app.state.hot_water.trigger()
 
         app.state.spikes = (
-            spikes.SpikeController(settings, app.state.db, app.state.collector.devices, app.state.notifier, spike_changed)
+            spikes.SpikeController(
+                settings, app.state.db, app.state.collector.devices, app.state.notifier, spike_changed, app.state.store
+            )
             if settings.spike and settings.spike.enabled
             else None
         )
@@ -98,11 +100,12 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             if app.state.spikes:
                 app.state.spikes.start()
         yield
-        await app.state.executor.stop()
-        if app.state.hot_water:
-            await app.state.hot_water.stop()
+        # The spike controller nudges the others, so it stops first; the collector (device connections) last.
         if app.state.spikes:
             await app.state.spikes.stop()
+        if app.state.hot_water:
+            await app.state.hot_water.stop()
+        await app.state.executor.stop()
         await app.state.collector.stop()
         await app.state.notifier.aclose()
         if own_db:
@@ -177,7 +180,9 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "peak_c": s.peak * 100,
             "active": s.start <= now,
             "overridden": spikes.overridden(_db(request), s),
-            "zones": ", ".join(settings.zones[z].name for z in settings.spike.zones if z in settings.zones),
+            "zones": ", ".join(
+                settings.zones[z].name for z in spikes.paused_zones(settings, _store(request), request.app.state.collector.devices)
+            ),
         }
 
     def fires_context(request: Request) -> dict:
@@ -284,9 +289,13 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         if ctl.mode == mode:
             return
         if mode == "manual" and ctl.manual_setpoint is None:
+            # Start from what the heater is set to now — for room-sensor control as the room temperature it
+            # amounts to (the manual value is a room target and gets shifted by the heater-vs-room gap).
             latest = _db(request).latest_reading(f"device:{settings.zones[zone_key].device}")
-            has_sp = latest is not None and latest["setpoint"] is not None
-            ctl.manual_setpoint = latest["setpoint"] if has_sp else store.comfort().day.preferred
+            seed = None
+            if latest is not None and latest["setpoint"] is not None:
+                seed = _executor(request).room_equivalent(zone_key, latest["setpoint"])
+            ctl.manual_setpoint = seed if seed is not None else store.comfort().day.preferred
         ctl.mode = mode
         store.set_zone(zone_key, ctl)
         _db(request).add_event("info", f"control:{zone_key}", f"{settings.zones[zone_key].name}: mode → {describe_mode(mode)}")
