@@ -1,7 +1,7 @@
 <article class="zone ctl" id="ctl-{{ key }}">
   <header>
     <h2>{{ zone.name }}</h2>
-    <span class="muted">{% if view.temp is not none %}{{ "%.1f" | format(view.temp) }} °C{% if view.temp_kind == "floor" %} floor{% endif %} now{% endif %}</span>
+    <span class="muted">{% if view.level_pct is not none %}{{ "%.0f" | format(view.level_pct) }}&nbsp;% hot{% elif view.temp is not none %}{{ "%.1f" | format(view.temp) }}&nbsp;°C{% if view.temp_kind == "floor" %} floor{% endif %} now{% endif %}</span>
   </header>
 
   {% if hot_water %}
@@ -44,14 +44,16 @@
         <button type="button" aria-label="Lower by 0.5 °C"
                 hx-post="/control/{{ key }}/setpoint" hx-vals='{"delta": -0.5}'
                 hx-target="#ctl-{{ key }}" hx-swap="outerHTML">−</button>
-        <span class="target">{{ "%.1f" | format(ctl.manual_setpoint) }}<small> °C</small></span>
+        <span class="target">{{ "%.1f" | format(ctl.manual_setpoint) }}<span class="unit">&nbsp;°C</span></span>
         <button type="button" aria-label="Raise by 0.5 °C"
                 hx-post="/control/{{ key }}/setpoint" hx-vals='{"delta": 0.5}'
                 hx-target="#ctl-{{ key }}" hx-swap="outerHTML">+</button>
       </div>
       <p class="muted small">Stays at this temperature until you change it or switch mode.</p>
     {% elif ctl.mode == "smart" %}
-      <div class="target">{{ "%.1f" | format(decision.room_target if decision.room_target is not none else decision.setpoint) }}<small> °C{% if decision.room_target is not none %} room{% endif %}</small></div>
+      {% if decision.room_target is not none or decision.setpoint is not none %}
+      <div class="target">{{ "%.1f" | format(decision.room_target if decision.room_target is not none else decision.setpoint) }}<span class="unit">&nbsp;°C{% if decision.room_target is not none %} room{% endif %}</span></div>
+      {% endif %}
       <p class="small">{{ decision.label }}</p>
       {% if decision.smart and decision.smart.next_change %}
         {% set at, nxt = decision.smart.next_change %}

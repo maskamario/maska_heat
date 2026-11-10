@@ -181,3 +181,32 @@ def history(settings: Settings, db: Database, zone_key: str, hours: int, now: fl
 
 def as_dict(obj) -> dict:
     return asdict(obj)
+
+
+ON_TARGET = 0.3  # °C either side of the target that still reads as "on target"
+ON_TARGET_FLOOR = 0.5  # a floor thermostat swings more around its setpoint
+
+
+def verdict(
+    view: ZoneView, target: float | None, paused_until: str | None = None, preheating: bool = False
+) -> tuple[str, str] | None:
+    """One plain-language line under a room's temperature, and its state ("ok", "cool", "warm", "paused").
+
+    `target` is the room temperature aimed at (or the heater's setpoint where the heater's sensor is the room's);
+    `paused_until` the end time ("19:00") while a price spike pauses the zone; `preheating` when the target is
+    raised on purpose (before a warmer slot or a price spike), so being below it is expected, not a problem.
+    """
+    if paused_until:
+        return f"Paused for the price spike until {paused_until}", "paused"
+    if view.temp is None or view.stale or target is None or view.level_pct is not None:
+        return None
+    diff = round(view.temp - target, 1)  # as displayed: 21.3 vs 21.0 is 0.3, not 0.30000000000000071
+    if abs(diff) <= (ON_TARGET_FLOOR if view.temp_kind == "floor" else ON_TARGET):
+        return "On target", "ok"
+    if diff < 0:
+        if preheating:
+            return f"Pre-heating to {target:.1f} °C", "cool"
+        if view.is_heating:
+            return f"Warming up to {target:.1f} °C", "cool"
+        return f"{-diff:.1f}° cooler than target {target:.1f} °C", "cool"
+    return f"{diff:.1f}° warmer than target {target:.1f} °C", "warm"

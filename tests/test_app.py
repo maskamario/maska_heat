@@ -182,3 +182,23 @@ def test_bad_input_is_rejected(settings, db):
         client.post("/fires", data={"stove": "masonry", "minutes_ago": "-30"})
         assert "-30" not in db.events(1)[0]["message"]
         assert client.get("/history?zone=nope&hours=99999").status_code == 200
+
+
+def test_verdict_lines():
+    from maska_heat.dashboard import ZoneView, verdict
+
+    def view(temp, **kw):
+        base = dict(key="k", name="K", temp=temp, temp_source="sensor:k", temp_kind="air", humidity=None, setpoint=None,
+                    floor_temp=None, level_pct=None, power_on=True, is_heating=None, power_w=None, updated_at=0,
+                    stale=False, device_online=True, device_enabled=True)
+        return ZoneView(**(base | kw))
+
+    assert verdict(view(21.8), 22.0) == ("On target", "ok")
+    assert verdict(view(21.3), 21.0) == ("On target", "ok")  # exactly 0.3 off, despite float rounding
+    assert verdict(view(20.6), 22.0)[0].startswith("1.4° cooler than target 22.0")
+    assert verdict(view(20.6, is_heating=True), 22.0)[0].startswith("Warming up to 22.0")
+    assert verdict(view(23.0), 22.0)[1] == "warm"
+    assert verdict(view(19.0), 22.0, paused_until="19:00") == ("Paused for the price spike until 19:00", "paused")
+    assert verdict(view(19.0, stale=True), 22.0) is None
+    assert verdict(view(68.0, level_pct=92), 22.0) is None  # hot water: no room verdict
+    assert verdict(view(21.3), 24.0, preheating=True) == ("Pre-heating to 24.0 °C", "cool")

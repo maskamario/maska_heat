@@ -92,4 +92,14 @@
     <button type="submit">Add holiday</button>
   </form>
 </section>
+
+<section class="card" id="notifications">
+  <header class="card-head"><h2>Phone notifications</h2><span class="muted">via ntfy · quiet at night except alerts</span></header>
+  {% if notify_available %}
+    <button type="button" hx-post="/notify/test" hx-target="#notify-result">Send test notification</button>
+    <span id="notify-result" class="small"></span>
+  {% else %}
+    <p class="muted small">Not set up — add the ntfy topic to secrets.yaml.</p>
+  {% endif %}
+</section>
 {% endblock %}

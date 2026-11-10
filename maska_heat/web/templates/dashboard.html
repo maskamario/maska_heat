@@ -1,23 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<div id="status" hx-get="/partials/status" hx-trigger="every 60s" hx-swap="innerHTML">
+<div id="status" class="status" hx-get="/partials/status" hx-trigger="every 60s" hx-swap="innerHTML">
   {% include "_status.html" %}
 </div>
 
-<section class="card">
-  <header class="card-head">
-    <h2>Electricity price</h2>
-    <span class="muted">c/kWh incl. network &amp; VAT · lighter bars = night tariff</span>
-  </header>
-  {% if prices %}
-    <div class="chart"><canvas id="price-chart" aria-label="Electricity price by hour"></canvas></div>
-    <script type="application/json" id="price-data">{{ prices_json | tojson }}</script>
-  {% else %}
-    <p class="muted">No prices yet — they are fetched on startup and after ~14:00 for tomorrow.</p>
-  {% endif %}
-</section>
-
 <div class="two">
+  {# Fires first: lighting the stove is the everyday action, the price chart is reference. #}
   <section class="card">
     <header class="card-head"><h2>Wood fires</h2></header>
     <form class="fire-form" hx-post="/fires" hx-target="#fires">
@@ -39,22 +27,29 @@
 
   <section class="card">
     <header class="card-head">
-      <h2>Events</h2>
-      <span>
-        <button class="link" hx-post="/notify/test" hx-target="#notify-result">Send test notification</button>
-        <span id="notify-result"></span>
-      </span>
+      <h2>Electricity price</h2>
+      <span class="legend"><i class="key day"></i>day <i class="key night"></i>night <i class="key spike"></i>spike · c/kWh incl. network &amp; VAT</span>
     </header>
-    <ul class="list events">
-      {% for e in events %}
-      <li class="lvl-{{ e.level }}">
-        <span class="muted">{{ e.ts | localtime("%d.%m %H:%M") }}</span>
-        <span>{{ e.message }}</span>
-      </li>
-      {% else %}
-      <li class="muted">No events.</li>
-      {% endfor %}
-    </ul>
+    {% if prices %}
+      <div class="chart"><canvas id="price-chart" aria-label="Electricity price by hour"></canvas></div>
+      <script type="application/json" id="price-data">{{ prices_json | tojson }}</script>
+    {% else %}
+      <p class="muted">No prices yet — they are fetched on startup and after ~14:00 for tomorrow.</p>
+    {% endif %}
   </section>
 </div>
+
+<section class="card">
+  <header class="card-head"><h2>Events</h2></header>
+  <ul class="list events">
+    {% for e in events %}
+    <li class="lvl-{{ e.level }}">
+      <span class="muted when">{{ e.ts | localtime("%d.%m %H:%M") }}</span>
+      <span>{{ e.message }}</span>
+    </li>
+    {% else %}
+    <li class="muted">No events.</li>
+    {% endfor %}
+  </ul>
+</section>
 {% endblock %}

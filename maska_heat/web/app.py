@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..collector import Collector
 from ..control import COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, ControlStore, DateRange, HouseSchedule, KidSchool, SchoolDay
-from ..dashboard import HISTORY_MAX_HOURS, as_dict, history, upcoming_prices, zone_view, zone_views
+from ..dashboard import HISTORY_MAX_HOURS, as_dict, history, upcoming_prices, verdict, zone_view, zone_views
 from ..db import Database
 from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
 from ..executor import Executor, describe_mode, zone_modes
@@ -153,20 +153,52 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
                 outdoor = {"temp": row["temp"], "source": "sensor"}
         if outdoor is None and weather:
             outdoor = {"temp": weather["temp"], "source": "forecast"}
+        views = zone_views(settings, db, now)
+        decided = decisions(request)
+        spike = spike_context(request, now)
+        paused = set(spike["keys"]) if spike and spike["active"] and not spike["overridden"] else set()
         return {
             "request": request,
-            "spike": spike_context(request, now),
+            "spike": spike,
             "energy_today": energy_summary(settings, db, "today", now),
-            "zones": zone_views(settings, db, now),
+            "zones": views,
+            "cards": {v.key: card_state(v, decided[v.key], spike["end"] if v.key in paused else None) for v in views},
             "price_now": next((p for p in prices if p.is_now), None),
             "prices": prices,
             "outdoor": outdoor,
             "weather": weather,
             "tariff_configured": settings.tariff.configured,
-            "decisions": decisions(request),
+            "decisions": decided,
             "now_ts": now,
             "away": _store(request).away(),
         }
+
+    def card_state(view, d, paused_until: str | None) -> dict:
+        """What a dashboard card shows besides the raw values: the target, a one-line verdict, the state edge."""
+        zone = settings.zones[view.key]
+        if d.room_target is not None:
+            target = d.room_target
+        elif zone.control_by == "room":
+            target = None  # the heater's own setpoint is not a room temperature
+        elif d.mode in ("manual", "smart") and d.setpoint is not None and not d.heater_units:
+            target = d.setpoint
+        else:
+            target = view.setpoint
+        preheating = d.label.startswith("pre-heating") or bool(d.smart and d.smart.preheating)
+        v = verdict(view, target, paused_until, preheating)
+        if not view.device_enabled:
+            state = ""
+        elif view.device_online is False:
+            state = "is-offline"
+        elif paused_until:
+            state = "is-paused"
+        elif view.power_on is False:
+            state = "is-off"
+        elif view.is_heating:
+            state = "is-heating"
+        else:
+            state = ""
+        return {"target": target, "verdict": v[0] if v else None, "tone": v[1] if v else None, "state": state}
 
     def spike_context(request: Request, now: float) -> dict | None:
         if not (settings.spike and settings.spike.enabled and settings.spike.zones):
@@ -176,15 +208,16 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             return None
         start = datetime.fromtimestamp(s.start, tz)
         day = "" if start.date() == datetime.fromtimestamp(now, tz).date() else "tomorrow "
+        keys = spikes.paused_zones(settings, _store(request), request.app.state.collector.devices)
         return {
             "start": s.start,
+            "end": datetime.fromtimestamp(s.end, tz).strftime("%H:%M"),
+            "keys": keys,
             "label": f"{day}{s.label(tz)}",
             "peak_c": s.peak * 100,
             "active": s.start <= now,
             "overridden": spikes.overridden(_db(request), s),
-            "zones": ", ".join(
-                settings.zones[z].name for z in spikes.paused_zones(settings, _store(request), request.app.state.collector.devices)
-            ),
+            "zones": ", ".join(settings.zones[z].name for z in keys),
         }
 
     def fires_context(request: Request) -> dict:
@@ -198,8 +231,10 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     def dashboard(request: Request):
         ctx = status_context(request) | fires_context(request)
         ctx["events"] = _db(request).events(15)
-        ctx["prices_json"] = [as_dict(p) for p in ctx["prices"]]
-        ctx["notify_available"] = request.app.state.notifier.available
+        known = spikes.spikes_around(settings, _db(request), time.time()) if settings.spike else []
+        ctx["prices_json"] = [
+            as_dict(p) | {"is_spike": any(s.start <= p.ts < s.end for s in known)} for p in ctx["prices"]
+        ]
         return templates.TemplateResponse(request, "dashboard.html", ctx)
 
     @app.get("/partials/status", response_class=HTMLResponse)
@@ -387,6 +422,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
                 "weekdays": WEEKDAYS,
                 "saved": saved,
                 "error": error,
+                "notify_available": request.app.state.notifier.available,
             },
         )
 

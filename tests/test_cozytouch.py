@@ -156,7 +156,7 @@ def test_hot_water_card_is_logging_only(settings, db):
     with TestClient(app) as client:
         assert app.state.executor.decide("hot_water").mode == "logging"
         page = client.get("/").text
-        assert "Hot water" in page and "91 %" in page
+        assert "Hot water" in page and '91<span class="unit">&nbsp;%' in page  # the tank level leads
         assert 'hx-post="/control/hot_water/mode"' not in client.get("/control").text
 
 

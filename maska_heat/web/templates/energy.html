@@ -15,17 +15,17 @@
 <section class="strip">
   <div class="stat">
     <div class="label">Heating electricity</div>
-    <div class="value">{{ "%.1f" | format(e.kwh) }}<small> kWh</small></div>
+    <div class="value">{{ "%.1f" | format(e.kwh) }}<span class="unit">&nbsp;kWh</span></div>
     <div class="sub">{{ e.label | lower }}</div>
   </div>
   <div class="stat">
     <div class="label">Cost</div>
-    <div class="value">{{ "%.2f" | format(e.cost) }}<small> €</small></div>
+    <div class="value">{{ "%.2f" | format(e.cost) }}<span class="unit">&nbsp;€</span></div>
     <div class="sub">incl. network, fees &amp; VAT{% if e.unpriced_kwh > 0.05 %} · {{ "%.1f" | format(e.unpriced_kwh) }} kWh without price{% endif %}</div>
   </div>
   <div class="stat">
     <div class="label">Average price paid</div>
-    <div class="value">{{ e.avg_price | cents }}<small> c/kWh</small></div>
+    <div class="value">{{ e.avg_price | cents }}<span class="unit">&nbsp;c/kWh</span></div>
     <div class="sub">
       {% if e.avg_price is not none and e.period_price is not none %}
         period average {{ e.period_price | cents }} c ·

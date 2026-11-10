@@ -17,7 +17,8 @@
   }
 
   function renderPrices(canvas, slots) {
-    const colors = slots.map((s) => (s.is_now ? css("--now") : s.is_day ? css("--day") : css("--night")));
+    // now = ink, spike hours = ochre, night tariff = frost, day tariff = neutral
+    const colors = slots.map((s) => (s.is_now ? css("--ink") : s.is_spike ? css("--ochre") : s.is_day ? css("--bar-day") : css("--frost")));
     new Chart(canvas, {
       type: "bar",
       data: {
@@ -39,8 +40,8 @@
           },
         },
         scales: {
-          // a label every 3 hours, on the whole hour only (also with 15-min slots)
-          x: { ticks: { callback: function (v) { const ms = +this.getLabelForValue(v); const p = parts(ms); return +p.hour % 3 === 0 && p.minute === "00" ? `${p.weekday} ${p.hour}` : ""; }, autoSkip: false, maxRotation: 0 }, grid: { display: false } },
+          // a label every 3 hours (6 on a phone), on the whole hour only (also with 15-min slots); the day name only at midnight
+          x: { ticks: { callback: function (v) { const ms = +this.getLabelForValue(v); const p = parts(ms); const every = canvas.clientWidth < 500 ? 6 : 3; if (+p.hour % every !== 0 || p.minute !== "00") return ""; return p.hour === "00" ? p.weekday : p.hour; }, autoSkip: false, maxRotation: 0 }, grid: { display: false } },
           y: { beginAtZero: true, title: { display: true, text: "c/kWh" } },
         },
       },
@@ -62,20 +63,20 @@
     const min = now - hours * 3600 * 1000;
     document.getElementById("history-title").textContent = data.name;
 
-    const palette = [css("--accent"), css("--text"), css("--day")];
+    const palette = [css("--ink"), css("--muted"), css("--zone-6")];  // room sensor, heater's own sensor, …
     const datasets = [];
     Object.entries(data.series).forEach(([source, s], i) => {
       const kind = source.split(":")[0];
       if (s.temp.length) datasets.push(lineSet(`${kind} temp`, s.temp, palette[i % palette.length]));
-      if (s.floor_temp && s.floor_temp.length) datasets.push(lineSet(`floor temp`, s.floor_temp, css("--day"), { borderWidth: 1.5 }));
-      if (s.setpoint.length) datasets.push(lineSet(`setpoint`, s.setpoint, css("--cool"), { borderDash: [6, 4], borderWidth: 1.5, stepped: true, tension: 0 }));
-      if (s.power_w.length) datasets.push(lineSet(`heater W`, s.power_w, css("--accent-soft"), { yAxisID: "power", stepped: true, fill: true, borderWidth: 0, tension: 0, order: 10 }));
+      if (s.floor_temp && s.floor_temp.length) datasets.push(lineSet(`floor temp`, s.floor_temp, css("--zone-5"), { borderWidth: 1.5 }));
+      if (s.setpoint.length) datasets.push(lineSet(`setpoint`, s.setpoint, css("--frost"), { borderDash: [6, 4], borderWidth: 1.5, stepped: true, tension: 0 }));
+      if (s.power_w.length) datasets.push(lineSet(`heater W`, s.power_w, css("--ember-soft"), { yAxisID: "power", stepped: true, fill: true, borderWidth: 0, tension: 0, order: 10 }));
     });
     const outdoor = data.outdoor_sensor.length ? data.outdoor_sensor : data.outdoor_forecast;
-    if (outdoor.length) datasets.push(lineSet(data.outdoor_sensor.length ? "outdoor" : "outdoor (forecast)", outdoor, css("--night"), { borderWidth: 1.5 }));
+    if (outdoor.length) datasets.push(lineSet(data.outdoor_sensor.length ? "outdoor" : "outdoor (forecast)", outdoor, css("--zone-6"), { borderWidth: 1.5, borderDash: [2, 3] }));
     const temps = datasets.filter((d) => d.yAxisID !== "power").flatMap((d) => d.data.map((p) => p.y));
     const top = temps.length ? Math.max(...temps) + 0.5 : 25;
-    if (data.fires.length) datasets.push({ label: "fire", type: "scatter", data: data.fires.map((f) => ({ x: f.ts, y: top })), pointStyle: "triangle", pointRadius: 7, backgroundColor: css("--accent") });
+    if (data.fires.length) datasets.push({ label: "fire", type: "scatter", data: data.fires.map((f) => ({ x: f.ts, y: top })), pointStyle: "triangle", pointRadius: 7, backgroundColor: css("--ember") });
 
     new Chart(document.getElementById("history-chart"), {
       type: "line",
@@ -94,12 +95,12 @@
 
     new Chart(document.getElementById("history-price-chart"), {
       type: "line",
-      data: { datasets: [lineSet("c/kWh", data.prices, css("--day"), { stepped: true, tension: 0 })] },
+      data: { datasets: [lineSet("c/kWh", data.prices, css("--ochre"), { stepped: true, tension: 0 })] },
       options: { ...baseOptions(), parsing: false, plugins: { legend: { display: false } }, scales: { x: timeAxis(min, now), y: { beginAtZero: true } } },
     });
   }
 
-  const ZONE_COLORS = ["--accent", "--cool", "--day", "--night", "--muted", "--text"];
+  const ZONE_COLORS = ["--zone-1", "--zone-2", "--zone-3", "--zone-4", "--zone-5", "--zone-6"];
 
   function renderEnergy(data) {
     const zones = data.devices.filter((d) => d.has_data).map((d) => d.zone);  // table order (JSON keys come sorted)

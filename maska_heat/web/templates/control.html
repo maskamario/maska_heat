@@ -4,17 +4,14 @@
 {% if error %}<p class="notice bad-bg">{{ error }}</p>{% endif %}
 
 <section class="card">
-  <header class="card-head">
-    <h2>Control</h2>
-    <span class="muted">Hands-off = heater's own app · Manual = fixed temperature · Smart = follows your schedule</span>
-  </header>
-  <div class="set-all">
-    <span class="muted">All rooms:</span>
+  <header class="card-head"><h2>All rooms</h2></header>
+  <div class="seg" role="group" aria-label="Control mode for all rooms">
     {% for m in ["handsoff", "manual", "smart"] %}
       <button type="button" hx-post="/control/all" hx-vals='{"mode": "{{ m }}"}'
               {% if m != "handsoff" %}hx-confirm="Switch every room to {{ mode_name(m) }}?"{% endif %}>{{ mode_name(m) }}</button>
     {% endfor %}
   </div>
+  <p class="muted small">Hands-off = the heater's own app · Manual = a fixed temperature · Smart = follows your schedule and prices.</p>
 </section>
 
 <section class="zones">

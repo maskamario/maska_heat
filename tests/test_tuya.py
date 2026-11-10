@@ -134,8 +134,8 @@ def test_logged_zone_is_never_controlled(settings, db):
         page = client.get("/control").text
         assert "Logging only" in page
         assert 'hx-post="/control/bathroom2/mode"' not in page
-        assert "27.5<small>°C floor</small>" in client.get("/").text
-        assert "27.5 °C floor now" in page
+        assert '27.5<span class="unit">&nbsp;°C floor</span>' in client.get("/").text
+        assert "27.5&nbsp;°C floor now" in page
 
         asyncio.run(app.state.executor.apply_zone("bathroom2"))
         assert written == []

@@ -1,40 +1,16 @@
-<section class="strip">
-  <div class="stat">
-    <div class="label">Electricity now</div>
-    {% if price_now %}
-      <div class="value">{{ price_now.cost_total | cents }}<small> c/kWh</small></div>
-      <div class="sub">spot {{ "%.1f" | format(price_now.eur_mwh / 10) }} c · {{ "day" if price_now.is_day else "night" }} tariff</div>
-    {% else %}
-      <div class="value">—</div><div class="sub">no price data yet</div>
-    {% endif %}
-  </div>
-  <div class="stat">
-    <div class="label">Heating today</div>
-    <div class="value">{{ "%.1f" | format(energy_today.kwh) }}<small> kWh</small> · {{ "%.2f" | format(energy_today.cost) }}<small> €</small></div>
-    <div class="sub"><a href="/energy">{% if energy_today.avg_price is not none %}{{ energy_today.avg_price | cents }} c/kWh on average · {% endif %}by room</a></div>
-  </div>
-  <div class="stat">
-    <div class="label">Outdoor</div>
-    <div class="value">{% if outdoor %}{{ "%.1f" | format(outdoor.temp) }}<small> °C</small>{% else %}—{% endif %}</div>
-    <div class="sub">
-      {% if outdoor %}{{ outdoor.source }}{% endif %}
-      {% if weather %} · wind {{ "%.0f" | format(weather.wind) }} m/s · cloud {{ "%.0f" | format(weather.cloud) }} %{% endif %}
-    </div>
-  </div>
-</section>
-
+{# Banners first: on a phone they must be visible without scrolling. #}
 {% if spike %}
-<p class="notice {{ 'ok-bg' if spike.overridden else 'bad-bg' }} spike">
+<div class="notice spike {{ 'is-overridden' if spike.overridden else '' }}" role="status">
   {% if spike.overridden %}
-    Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — <strong>heating normally</strong> (overridden).
+    <p>Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }}&nbsp;c/kWh) — <strong>heating normally</strong>, you chose to keep heating.</p>
     <button type="button" hx-post="/spike/{{ spike.start }}/resume">Pause again</button>
   {% elif not spike.zones %}
-    Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — nothing pauses: the zones are in Manual or Hands-off.
+    <p>Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }}&nbsp;c/kWh) — nothing pauses: the rooms are in Manual or Hands-off.</p>
   {% else %}
-    ⚡ Price spike {{ spike.label }} (up to {{ "%.0f" | format(spike.peak_c) }} c/kWh) — {{ "paused now" if spike.active else "will pause" }}: {{ spike.zones }}.
-    <button type="button" hx-post="/spike/{{ spike.start }}/override">Keep heating</button>
+    <p><strong>Price spike {{ spike.label }}</strong> (up to {{ "%.0f" | format(spike.peak_c) }}&nbsp;c/kWh) — {{ "paused now" if spike.active else "will pause" }}: {{ spike.zones }}.</p>
+    <button type="button" class="primary" hx-post="/spike/{{ spike.start }}/override">Keep heating</button>
   {% endif %}
-</p>
+</div>
 {% endif %}
 
 {% if away.end and away.start and away.start.timestamp() <= now_ts < away.end.timestamp() %}
@@ -45,38 +21,69 @@
 <p class="notice">Network tariff not configured — costs show spot price + VAT only. Set <code>tariff</code> in config.yaml.</p>
 {% endif %}
 
+<section class="strip">
+  <div class="stat">
+    <div class="label">Electricity now</div>
+    {% if price_now %}
+      <div class="value">{{ price_now.cost_total | cents }}<span class="unit">&nbsp;c/kWh</span></div>
+      <div class="sub">{{ "day" if price_now.is_day else "night" }} tariff · spot {{ "%.1f" | format(price_now.eur_mwh / 10) }}&nbsp;c</div>
+    {% else %}
+      <div class="value">—</div><div class="sub">no price data yet</div>
+    {% endif %}
+  </div>
+  <a class="stat" href="/energy">
+    <div class="label">Heating today</div>
+    <div class="value">{{ "%.2f" | format(energy_today.cost) }}<span class="unit">&nbsp;€</span></div>
+    <div class="sub">{{ "%.1f" | format(energy_today.kwh) }}&nbsp;kWh{% if energy_today.avg_price is not none %} · {{ energy_today.avg_price | cents }}&nbsp;c/kWh on average{% endif %}</div>
+  </a>
+  <div class="stat">
+    <div class="label">Outdoor</div>
+    <div class="value">{% if outdoor %}{{ "%.1f" | format(outdoor.temp) }}<span class="unit">&nbsp;°C</span>{% else %}—{% endif %}</div>
+    <div class="sub">
+      {% if outdoor %}{{ outdoor.source }}{% endif %}
+      {% if weather %} · wind {{ "%.0f" | format(weather.wind) }}&nbsp;m/s · cloud {{ "%.0f" | format(weather.cloud) }}&nbsp;%{% endif %}
+    </div>
+  </div>
+</section>
+
 <section class="zones">
   {% for z in zones %}
-  <article class="zone {% if z.stale %}is-stale{% endif %}">
+  {% set d = decisions[z.key] %}
+  {% set c = cards[z.key] %}
+  <article class="zone {{ c.state }} {% if z.stale %}is-stale{% endif %}">
     <header>
       <h2>{{ z.name }}</h2>
       {% if not z.device_enabled %}
         <span class="badge">not set up</span>
       {% elif z.device_online is sameas false %}
         <span class="badge bad">offline</span>
+      {% elif c.state == "is-paused" %}
+        <span class="badge paused">paused</span>
       {% elif z.power_on is sameas false %}
         <span class="badge">off</span>
       {% elif z.is_heating %}
-        <span class="badge hot">heating{% if z.power_w %} · {{ "%.0f" | format(z.power_w) }} W{% endif %}</span>
+        <span class="badge hot">heating{% if z.power_w %} · {{ "%.0f" | format(z.power_w) }}&nbsp;W{% endif %}</span>
       {% elif z.is_heating is sameas false %}
         <span class="badge">idle</span>
       {% endif %}
     </header>
-    <div class="temp">{% if z.temp is not none %}{{ "%.1f" | format(z.temp) }}<small>°C{% if z.temp_kind == "floor" %} floor{% endif %}</small>{% else %}—{% endif %}</div>
+
+    {% if z.level_pct is not none %}
+      <div class="temp">{{ "%.0f" | format(z.level_pct) }}<span class="unit">&nbsp;%</span></div>
+      <p class="verdict">hot water in the tank</p>
+    {% else %}
+      <div class="temp">{% if z.temp is not none %}{{ "%.1f" | format(z.temp) }}<span class="unit">&nbsp;°C{% if z.temp_kind == "floor" %} floor{% endif %}</span>{% else %}—{% endif %}</div>
+      {% if c.verdict %}<p class="verdict tone-{{ c.tone }}">{{ c.verdict }}</p>{% endif %}
+    {% endif %}
+
     <dl>
-      {% set d = decisions[z.key] %}
-      {% if d.room_target is not none %}
-      <div><dt>Target</dt><dd>{{ "%.1f" | format(d.room_target) }} °C <span class="muted">(heater {{ "%.1f" | format(z.setpoint) if z.setpoint is not none else "—" }})</span></dd></div>
-      {% else %}
-      <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
-      {% endif %}
-      <div><dt>Control</dt><dd>{% if d.mode == "logging" %}{{ mode_name(d.mode) }}{% else %}<a href="/control">{{ mode_name(d.mode) }}</a>{% endif %}{% if d.mode == "smart" %} · {{ d.label }}{% endif %}</dd></div>
-      {% if z.level_pct is not none %}<div><dt>Hot water</dt><dd>{{ "%.0f" | format(z.level_pct) }} %</dd></div>{% endif %}
-      {% if z.floor_temp is not none and z.temp_kind != "floor" %}<div><dt>Floor</dt><dd>{{ "%.1f" | format(z.floor_temp) }} °C</dd></div>{% endif %}
-      {% if z.humidity is not none %}<div><dt>Humidity</dt><dd>{{ "%.0f" | format(z.humidity) }} %</dd></div>{% endif %}
-      <div><dt>Source</dt><dd>{{ (z.temp_source or "—").split(":")[0] }}</dd></div>
-      <div><dt>Updated</dt><dd>{{ z.updated_at | age }}</dd></div>
+      {% if z.level_pct is not none and z.temp is not none %}<div><dt>Water</dt><dd>{{ "%.0f" | format(z.temp) }}&nbsp;°C</dd></div>
+      {% elif c.target is not none %}<div><dt>Target</dt><dd>{{ "%.1f" | format(c.target) }}&nbsp;°C</dd></div>{% endif %}
+      <div><dt>Control</dt><dd>{% if d.mode == "logging" %}{{ mode_name(d.mode) }}{% else %}<a href="/control">{{ mode_name(d.mode) }}</a>{% endif %}{% if d.mode == "smart" and c.state != "is-paused" %} · {{ d.label }}{% endif %}</dd></div>
+      {% if z.floor_temp is not none and z.temp_kind != "floor" %}<div><dt>Floor</dt><dd>{{ "%.1f" | format(z.floor_temp) }}&nbsp;°C</dd></div>{% endif %}
+      {% if z.humidity is not none %}<div><dt>Humidity</dt><dd>{{ "%.0f" | format(z.humidity) }}&nbsp;%</dd></div>{% endif %}
     </dl>
+    <footer>{{ (z.temp_source or "no reading").split(":")[0] }}{% if z.stale %} · <span class="bad">updated {{ z.updated_at | age }}</span>{% else %} · {{ z.updated_at | age }}{% endif %}</footer>
   </article>
   {% endfor %}
 </section>
