@@ -153,3 +153,34 @@ async def test_collector_energy_failure_marks_health(settings, db):
     c.devices = {"living_mitsubishi": Down()}
     await c.update_energy()
     assert c.health["energy:living_mitsubishi"].failing
+
+
+async def test_one_day_without_hourly_data_does_not_stop_the_rest(settings, db):
+    c = Collector(settings, {}, db, Notifier(settings.notify, None, db, TZ))
+    today = datetime.now(TZ).date()
+    gone = today - timedelta(days=8)
+
+    class Patchy(FakeMelcloud):
+        async def energy_hours(self, day, tz):
+            if day == gone:
+                self.hourly.append(day)
+                raise RuntimeError("expected hourly data, got LabelType 1")
+            return await super().energy_hours(day, tz)
+
+    fake = Patchy()
+    c.devices = {"living_mitsubishi": fake}
+    await c.update_energy()
+    assert not c.health["energy:living_mitsubishi"].failing  # daily data is fine: no "offline" alert
+    assert any(r["minutes"] == 60 for r in _day(db, today - timedelta(days=10)))  # days after it still fetched
+    fake.hourly.clear()
+    await c.update_energy()
+    assert gone not in fake.hourly  # not asked again
+
+
+async def test_partial_hourly_day_is_fetched_again(settings, db):
+    c = Collector(settings, {}, db, Notifier(settings.notify, None, db, TZ))
+    today = datetime.now(TZ).date()
+    d = today - timedelta(days=4)
+    midnight = datetime.combine(d, datetime.min.time(), TZ)
+    db.upsert_energy("device:living_mitsubishi", [(int((midnight + timedelta(hours=h)).timestamp()), 60, 0.5) for h in range(15)])
+    assert d in c._hourly_days_to_fetch("device:living_mitsubishi", today)  # only 00–14 known (fetched as "today")

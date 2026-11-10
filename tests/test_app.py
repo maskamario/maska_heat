@@ -146,7 +146,10 @@ def test_control_and_settings_pages(settings, db):
 
         client.post("/settings/holidays", data={"start": "2026-10-19", "end": "2026-10-25"})
         assert len(store.school().holidays) == 1
-        client.post("/settings/holidays/delete", data={"index": "0"})
+        client.post("/settings/holidays", data={"start": "2026-12-21", "end": "2027-01-04"})
+        client.post("/settings/holidays/delete", data={"start": "2026-12-21", "end": "2027-01-04"})  # by dates
+        assert [h.start.month for h in store.school().holidays] == [10]
+        client.post("/settings/holidays/delete", data={"start": "2026-10-19", "end": "2026-10-25"})
         assert store.school().holidays == []
 
         client.post("/away", data={"start": "", "end": "2030-01-01T18:00"})
@@ -158,3 +161,24 @@ def test_control_and_settings_pages(settings, db):
 
         client.post("/home-today/madli", data={"on": "1"})
         assert "madli" in store.home_today()
+
+
+def test_long_history_is_thinned(settings, db):
+    from maska_heat.dashboard import history
+    from maska_heat.db import Reading
+
+    now = 1_800_000_000
+    db.add_readings([Reading(now - 60 * m, "device:madli_adax", temp=20.0 + m % 7, setpoint=21.0) for m in range(14 * 24 * 60)])
+    week = history(settings, db, "madli", 14 * 24, now)["series"]["device:madli_adax"]["temp"]
+    assert len(week) <= 14 * 24 * 4 + 1  # one point per 15 min
+    day = history(settings, db, "madli", 24, now)["series"]["device:madli_adax"]["temp"]
+    assert len(day) == 24 * 60 + 1  # two days or less: every reading (both ends included)
+
+
+def test_bad_input_is_rejected(settings, db):
+    app = create_app(settings, {}, start_jobs=False, db=db)
+    with TestClient(app) as client:
+        assert client.post("/control/madli/setpoint", data={"setpoint": "nan"}).status_code == 400
+        client.post("/fires", data={"stove": "masonry", "minutes_ago": "-30"})
+        assert "-30" not in db.events(1)[0]["message"]
+        assert client.get("/history?zone=nope&hours=99999").status_code == 200

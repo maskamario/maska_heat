@@ -12,6 +12,13 @@ from .settings import Settings
 from .tariff import elec_cost
 
 SENSOR_STALE_SECONDS = 300
+HISTORY_MAX_HOURS = 24 * 31
+
+
+def history_step(hours: int) -> int:
+    """Seconds per chart point: every reading for two days, then coarser (31 days at 1 min = 44 000 points per
+    line, far more than a phone screen shows and seconds of work on the Pi)."""
+    return 0 if hours <= 48 else 300 if hours <= 7 * 24 else 900
 
 
 @dataclass
@@ -142,8 +149,9 @@ def history(settings: Settings, db: Database, zone_key: str, hours: int, now: fl
     since = int(now - hours * 3600)
     sources = list(dict.fromkeys(zone.temp_sources + ([f"device:{zone.device}"] if zone.device else [])))
     series = {}
+    step = history_step(hours)
     for source in sources:
-        rows = db.readings(source, since)
+        rows = db.readings(source, since, step=step)
         series[source] = {
             "temp": [[r["ts"] * 1000, r["temp"]] for r in rows if r["temp"] is not None],
             "setpoint": [[r["ts"] * 1000, r["setpoint"]] for r in rows if r["setpoint"] is not None],
@@ -153,7 +161,7 @@ def history(settings: Settings, db: Database, zone_key: str, hours: int, now: fl
         }
     outdoor = [[r["ts"] * 1000, r["temp"]] for r in db.weather(since, int(now) + 3600)]
     if settings.outdoor_sensor:
-        rows = db.readings(f"sensor:{settings.outdoor_sensor}", since)
+        rows = db.readings(f"sensor:{settings.outdoor_sensor}", since, step=step)
         outdoor_sensor = [[r["ts"] * 1000, r["temp"]] for r in rows if r["temp"] is not None]
     else:
         outdoor_sensor = []

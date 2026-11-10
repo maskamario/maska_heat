@@ -1,11 +1,13 @@
-// Charts for the dashboard and history pages. Times arrive as unix ms; shown in the browser's local time.
+// Charts for the dashboard and history pages. Times arrive as unix ms and are shown in the house's timezone
+// (<html data-tz>), like every time the server writes — not the phone's, which may be elsewhere.
 (function () {
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const hhmm = (ms) => new Date(ms).toLocaleTimeString("et-EE", { hour: "2-digit", minute: "2-digit" });
-  const dayHour = (ms) => {
-    const d = new Date(ms);
-    return d.toLocaleDateString("en-GB", { weekday: "short" }) + " " + String(d.getHours()).padStart(2, "0");
-  };
+  const timeZone = document.documentElement.dataset.tz || undefined;
+  const partsFmt = new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const parts = (ms) => Object.fromEntries(partsFmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+  const hhmm = (ms) => { const p = parts(ms); return `${p.hour}:${p.minute}`; };
+  const dayTime = (ms) => { const p = parts(ms); return `${p.weekday} ${p.hour}:${p.minute}`; };
+  const dayDate = (ms, month) => new Date(ms).toLocaleDateString("en-GB", { timeZone, weekday: "short", day: "numeric", ...(month ? { month: "numeric" } : {}) });
 
   function baseOptions() {
     Chart.defaults.color = css("--muted");
@@ -28,7 +30,7 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              title: (items) => dayHour(+items[0].label) + ":00",
+              title: (items) => dayTime(+items[0].label),
               label: (item) => {
                 const s = slots[item.dataIndex];
                 return [`${item.raw.toFixed(1)} c/kWh total`, `spot ${(s.eur_mwh / 10).toFixed(1)} c/kWh`, s.is_day ? "day tariff" : "night tariff"];
@@ -37,7 +39,8 @@
           },
         },
         scales: {
-          x: { ticks: { callback: function (v) { const ms = +this.getLabelForValue(v); return new Date(ms).getHours() % 3 === 0 ? dayHour(ms) : ""; }, autoSkip: false, maxRotation: 0 }, grid: { display: false } },
+          // a label every 3 hours, on the whole hour only (also with 15-min slots)
+          x: { ticks: { callback: function (v) { const ms = +this.getLabelForValue(v); const p = parts(ms); return +p.hour % 3 === 0 && p.minute === "00" ? `${p.weekday} ${p.hour}` : ""; }, autoSkip: false, maxRotation: 0 }, grid: { display: false } },
           y: { beginAtZero: true, title: { display: true, text: "c/kWh" } },
         },
       },
@@ -49,7 +52,7 @@
   }
 
   function timeAxis(min, max) {
-    return { type: "linear", min, max, ticks: { callback: (v) => { const d = new Date(v); return d.getHours() === 0 && d.getMinutes() === 0 ? d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }) : hhmm(v); }, maxTicksLimit: 10 } };
+    return { type: "linear", min, max, ticks: { callback: (v) => { const p = parts(v); return p.hour === "00" && p.minute === "00" ? dayDate(v) : hhmm(v); }, maxTicksLimit: 10 } };
   }
 
   async function renderHistory({ zone, hours }) {
@@ -80,7 +83,7 @@
       options: {
         ...baseOptions(),
         parsing: false,
-        plugins: { tooltip: { callbacks: { title: (items) => new Date(items[0].parsed.x).toLocaleString("et-EE") } } },
+        plugins: { tooltip: { callbacks: { title: (items) => new Date(items[0].parsed.x).toLocaleString("et-EE", { timeZone }) } } },
         scales: {
           x: timeAxis(min, now),
           y: { grace: 0.5, title: { display: true, text: "°C" } },
@@ -103,7 +106,7 @@
     const color = (zone) => css(ZONE_COLORS[data.devices.findIndex((d) => d.zone === zone) % ZONE_COLORS.length]);
     document.querySelectorAll(".swatch[data-zone]").forEach((el) => { el.style.background = color(el.dataset.zone); });
     const names = Object.fromEntries(data.devices.map((d) => [d.zone, d.name]));
-    const label = (ms) => data.by_hour ? hhmm(ms) : new Date(ms).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "numeric" });
+    const label = (ms) => data.by_hour ? hhmm(ms) : dayDate(ms, true);
     let chart;
     function draw(unit) {
       if (chart) chart.destroy();

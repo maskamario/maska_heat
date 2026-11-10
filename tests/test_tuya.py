@@ -169,6 +169,8 @@ def test_schema_6_floor_rows_are_corrected(tmp_path):
     db.close()
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA user_version=6")
+    conn.execute("DELETE FROM kv WHERE key='migrated_floor_temp'")  # as written by a schema 5-6 build
+    conn.commit()
     conn.close()
 
     db = Database(path)
@@ -178,4 +180,34 @@ def test_schema_6_floor_rows_are_corrected(tmp_path):
     db.close()
     db = Database(path)  # runs once: reopening does not move values again
     assert db.latest_reading("device:bathroom2_floor")["floor_temp"] == 27.0
+    db.close()
+
+
+async def test_sensor_mode_remembered_when_a_reply_leaves_it_out():
+    class Dev:
+        def __init__(self):
+            self.replies = [{"dps": dict(DPS)}, {"dps": {k: v for k, v in DPS.items() if k != "116"}}]
+
+        def status(self):
+            return self.replies.pop(0)
+
+    a = TuyaThermostatAdapter("id", "host", "key", device=Dev())
+    first, second = await a.read(), await a.read()
+    assert (second.room_temp, second.floor_temp) == (first.room_temp, first.floor_temp)
+
+
+
+def test_floor_correction_never_runs_twice(tmp_path):
+    """An older build reopening the database resets user_version to 6; the correction must not run again."""
+    path = tmp_path / "v7.db"
+    Database(path).close()
+    db = Database(path)
+    db.add_readings([Reading(1, "device:bathroom2_floor", temp=22.0, floor_temp=26.0)])  # v7: air + floor
+    db.close()
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA user_version=6")
+    conn.close()
+    db = Database(path)
+    r = db.latest_reading("device:bathroom2_floor")
+    assert (r["temp"], r["floor_temp"]) == (22.0, 26.0)
     db.close()

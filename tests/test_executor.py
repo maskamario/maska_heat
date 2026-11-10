@@ -149,3 +149,26 @@ async def test_smart_remembers_preheat_between_runs(rig, monkeypatch):
     store.set_zone("madli", ZoneControl(mode="handsoff", engaged=True, restore_setpoint=19))
     await ex.apply_zone("madli")
     assert "madli" not in ex._preheating_for
+
+
+async def test_change_back_while_cloud_still_reports_the_old_value(rig):
+    """Sent 21 while the Adax still reports 20; the target goes back to 20 before the cloud caught up: send 20 again."""
+    ex, store, db, adax, _ = rig
+    reading(db, "madli_adax", 20)
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=21))
+    await ex.apply_zone("madli")
+    assert adax.sent == [21]
+    store.set_zone("madli", store.zone("madli").model_copy(update={"manual_setpoint": 20}))
+    await ex.apply_zone("madli")  # the device still reports 20, but is heading for 21
+    assert adax.sent == [21, 20]
+
+
+def test_preheat_lock_survives_a_restart(rig, settings):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ex, store, db, adax, mill = rig
+    at = datetime(2026, 11, 11, 6, 30, tzinfo=ZoneInfo("Europe/Tallinn"))
+    ex._set_preheat("madli", at)
+    again = Executor(settings, db, store, {"madli_adax": adax, "matis_mill": mill})
+    assert again._preheating_for == {"madli": at}

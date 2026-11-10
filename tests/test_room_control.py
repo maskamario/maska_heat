@@ -131,7 +131,7 @@ def test_cards_show_room_target(settings, db):
         app.state.store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
         page = client.get("/control").text
         assert "Heater set to 17.0 °C" in page and "3.1 °C lower than the room" in page
-        assert "(heater 17)" in client.get("/").text
+        assert "(heater 17.0)" in client.get("/").text
 
 
 def test_manual_starts_from_the_room_equivalent(settings, db):

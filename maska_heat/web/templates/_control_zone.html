@@ -17,7 +17,7 @@
     {% if ctl.mode == "smart" %}
       <p class="small">Heats only in the {{ hot_water.hours }} cheapest hours of the day — enough before the morning and a top-up before the evening.</p>
       <dl class="plan">
-        <div><dt>Today</dt><dd>{{ hot_water.today }}</dd></div>
+        <div><dt>Today</dt><dd>{{ hot_water.today or "waiting for today's prices — keeps its last schedule" }}</dd></div>
         <div><dt>Tomorrow</dt><dd>{{ hot_water.tomorrow or "after tomorrow's prices (~14:00)" }}</dd></div>
       </dl>
       <p class="muted small">Below {{ "%.0f" | format(hot_water.boost_below) }} % hot water outside these hours it boosts once and notifies you.{% if view.level_pct is not none %} Now {{ "%.0f" | format(view.level_pct) }} %.{% endif %}</p>

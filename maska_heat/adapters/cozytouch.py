@@ -187,16 +187,21 @@ class CozytouchWaterHeaterAdapter:
 
         if self.device_id is None:
             await self.read()
-        if not self._token or time.time() >= self._token_until:
-            await self._login()
-        try:
-            r = await self._client.post(
-                "/magellan/executions/writecapability",
-                headers={"Authorization": f"Bearer {self._token}"},
-                json={"capabilityId": capability, "deviceId": self.device_id, "value": value},
-            )
-        except httpx.HTTPError as e:
-            raise DeviceError(f"Cozytouch write {capability}: {type(e).__name__}") from e
+        for attempt in (1, 2):
+            if not self._token or time.time() >= self._token_until:
+                await self._login()
+            try:
+                r = await self._client.post(
+                    "/magellan/executions/writecapability",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json={"capabilityId": capability, "deviceId": self.device_id, "value": value},
+                )
+            except httpx.HTTPError as e:
+                raise DeviceError(f"Cozytouch write {capability}: {type(e).__name__}") from e
+            if r.status_code == 401 and attempt == 1:  # token revoked early: log in again once
+                self._token = None
+                continue
+            break
         if r.status_code == 429:
             raise DeviceError(f"Cozytouch write {capability}: rate limited")
         if r.status_code != 201:

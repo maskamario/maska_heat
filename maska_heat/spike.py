@@ -79,13 +79,26 @@ def day_spikes(settings: Settings, db: Database, day: date) -> list[Spike] | Non
 
 
 def spikes_around(settings: Settings, db: Database, now: float) -> list[Spike]:
-    """Known spikes of today and tomorrow."""
+    """Known spikes from yesterday to tomorrow; one running over midnight (23:00–01:00) is one spike."""
     tz = ZoneInfo(settings.location.timezone)
     today = datetime.fromtimestamp(now, tz).date()
-    out = []
-    for d in (today, today + timedelta(days=1)):
-        out += day_spikes(settings, db, d) or []
-    return out
+    return _days(settings, db, today - timedelta(days=1), today + timedelta(days=1))
+
+
+def _days(settings: Settings, db: Database, first: date, last: date) -> list[Spike]:
+    found: list[Spike] = []
+    d = first
+    while d <= last:
+        found += day_spikes(settings, db, d) or []
+        d += timedelta(days=1)
+    merged: list[Spike] = []
+    for sp in sorted(found, key=lambda x: x.start):
+        if merged and merged[-1].end == sp.start:  # keeps the first part's start (the override key) and threshold
+            prev = merged[-1]
+            merged[-1] = Spike(prev.start, sp.end, max(prev.peak, sp.peak), prev.threshold)
+        else:
+            merged.append(sp)
+    return merged
 
 
 def active(settings: Settings, db: Database, now: float) -> Spike | None:
@@ -157,12 +170,13 @@ def spike_hours(settings: Settings, db: Database, day: date) -> set[int]:
     """Start minutes (local) of the day's spike hours that are not overridden — the water heater avoids them."""
     tz = ZoneInfo(settings.location.timezone)
     out = set()
-    for s in day_spikes(settings, db, day) or []:
+    for s in _days(settings, db, day - timedelta(days=1), day + timedelta(days=1)):
         if overridden(db, s):
             continue
         for h in range(s.start, s.end, 3600):
             local = datetime.fromtimestamp(h, tz)
-            out.add(local.hour * 60)
+            if local.date() == day:
+                out.add(local.hour * 60)
     return out
 
 
@@ -182,6 +196,7 @@ class SpikeController:
         self._last: tuple[int, bool] | None = None
         self._announced: set[int] = set()  # spikes already written to the events
         self._tried: dict[int, float] = {}  # spike start -> last failed send
+        self._lowered: set[str] = set()  # floors this process has lowered for the running spike
         self.jobs = Jobs()
 
     def _paused(self) -> list[str]:
@@ -253,26 +268,46 @@ class SpikeController:
         else:
             self._tried[s.start] = now
 
-    async def _floors(self, now: float) -> None:
-        """Floor thermostats are not controlled otherwise: lower their setpoint for the spike, then put it back."""
+    async def _floors(self, now: float, stopping: bool = False) -> None:
+        """Floor thermostats are not controlled otherwise: lower their setpoint for the spike, then put it back.
+
+        Every floor saved in kv is put back once it is not paused, even if spikes were switched off or the zone
+        was taken out of spike.zones meanwhile — and when the app stops, so a reboot mid-spike can't leave the
+        floor at its minimum (it is paused again on start if the spike still runs)."""
         saved = json.loads(self.db.get_kv(FLOOR_KEY) or "{}")
-        for zone in self.cfg.zones:
+        for zone in dict.fromkeys([*self.cfg.zones, *saved]):
             z = self.settings.zones.get(zone)
             adapter = self.devices.get(z.device) if z and z.device else None
             if adapter is None or not _spike_floor(adapter):
                 continue
             latest = self.db.latest_reading(f"device:{z.device}")
             current = latest["setpoint"] if latest else None
-            paused = pausing(self.settings, self.db, zone, now)
             low = adapter.capabilities.setpoint_min
-            if paused and zone not in saved and current is not None:
-                await adapter.set_setpoint(low)
-                saved[zone] = current
-                self.db.set_kv(FLOOR_KEY, json.dumps(saved))
-                self._event(f"{z.name}: paused for the price spike {paused.label(self.tz)} (was {current:.1f} °C)")
-            elif not paused and zone in saved:
+            at_low = current is not None and abs(current - low) < 0.05
+            if stopping:
+                # Put it back while the app is down, but keep the saved value: after a restart the last reading
+                # may still show the minimum, and that must not become "the setpoint to restore".
+                if zone in saved and at_low:
+                    await adapter.set_setpoint(saved[zone])
+                    self._event(f"{z.name}: app stopping — back to {saved[zone]:.1f} °C")
+                continue
+            paused = pausing(self.settings, self.db, zone, now)
+            if paused:
+                if zone not in saved:
+                    if current is None:
+                        continue
+                    saved[zone] = current
+                    self.db.set_kv(FLOOR_KEY, json.dumps(saved))
+                # Lowered once per process, so a change made by hand during the spike stays. Already at the minimum
+                # (e.g. after a restart, possibly a stale reading) → keep watching instead of counting it as done.
+                if zone not in self._lowered and not at_low:
+                    self._lowered.add(zone)
+                    await adapter.set_setpoint(low)
+                    self._event(f"{z.name}: paused for the price spike {paused.label(self.tz)} (was {saved[zone]:.1f} °C)")
+            elif zone in saved:
                 restore = saved.pop(zone)
-                if current is None or abs(current - low) < 0.05:  # leave it if someone changed it meanwhile
+                self._lowered.discard(zone)
+                if current is None or at_low:  # leave it if someone changed it meanwhile
                     await adapter.set_setpoint(restore)
                     self._event(f"{z.name}: back to {restore:.1f} °C after the price spike")
                 self.db.set_kv(FLOOR_KEY, json.dumps(saved))
@@ -282,3 +317,7 @@ class SpikeController:
 
     async def stop(self) -> None:
         await self.jobs.stop()
+        try:
+            await self._floors(_time.time(), stopping=True)
+        except Exception as e:
+            log.warning("could not restore the floor on shutdown: %s", e)

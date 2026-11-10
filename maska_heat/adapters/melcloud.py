@@ -68,29 +68,40 @@ class MelcloudAdapter:
 
         self._session = aiohttp.ClientSession()
         try:
-            token = await pymelcloud.login(self._email, self._password, session=self._session)
-            devices = await pymelcloud.get_devices(token, session=self._session)
-        except Exception as e:  # pymelcloud raises plain aiohttp errors
-            raise DeviceError(f"MELCloud login/device list failed: {e}") from e
+            try:
+                token = await pymelcloud.login(self._email, self._password, session=self._session)
+                devices = await pymelcloud.get_devices(token, session=self._session)
+            except Exception as e:  # pymelcloud raises plain aiohttp errors
+                raise DeviceError(f"MELCloud login/device list failed: {e}") from e
 
-        units = devices.get(pymelcloud.DEVICE_TYPE_ATA, [])
-        if not units:
-            raise DeviceError("No air-to-air units on this MELCloud account")
-        if self.device_name is None:
-            self._device = units[0]
-        else:
-            matches = [u for u in units if u.name == self.device_name]
-            if not matches:
-                names = ", ".join(repr(u.name) for u in units)
-                raise DeviceError(f"MELCloud device {self.device_name!r} not found (available: {names})")
-            self._device = matches[0]
+            units = devices.get(pymelcloud.DEVICE_TYPE_ATA, [])
+            if not units:
+                raise DeviceError("No air-to-air units on this MELCloud account")
+            if self.device_name is None:
+                self._device = units[0]
+            else:
+                matches = [u for u in units if u.name == self.device_name]
+                if not matches:
+                    names = ", ".join(repr(u.name) for u in units)
+                    raise DeviceError(f"MELCloud device {self.device_name!r} not found (available: {names})")
+                self._device = matches[0]
+        except Exception:
+            await self._reset()  # don't leak a session per failed poll
+            raise
         return self._device
+
+    async def _reset(self) -> None:
+        """Drop the connection; the next call logs in again (also covers a token that stopped working)."""
+        session, self._session, self._device = self._session, None, None
+        if session is not None:
+            await session.close()
 
     async def read(self) -> DeviceState:
         d = await self._connect()
         try:
             await d.update()
         except Exception as e:
+            await self._reset()
             raise DeviceError(f"MELCloud update failed: {e}") from e
         if d.target_temperature_min is not None and d.target_temperature_max is not None:
             self.capabilities = Capabilities(
@@ -136,6 +147,7 @@ class MelcloudAdapter:
             ) as resp:
                 return await resp.json()
         except Exception as e:
+            await self._reset()
             raise DeviceError(f"MELCloud energy report failed: {e}") from e
 
     async def energy_days(self, start: date, end: date, tz: tzinfo) -> list[tuple[datetime, float]]:
@@ -175,5 +187,4 @@ class MelcloudAdapter:
             raise DeviceError(f"MELCloud set failed: {e}") from e
 
     async def aclose(self) -> None:
-        if self._session is not None:
-            await self._session.close()
+        await self._reset()

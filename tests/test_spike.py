@@ -267,3 +267,56 @@ def test_safety_heating_has_hysteresis(s, db):
     assert ex.decide("madli", now=at(16.3)).safety  # just above the limit: keeps heating
     room(db, "madli_adax", 18.6, at(16.4))
     assert not ex.decide("madli", now=at(16.4)).safety
+
+
+def test_no_preheat_when_nobody_is_home(s, db):
+    ex, store = executor(s, db)
+    room(db, "madli_adax", 20.0, at(15.5))
+    assert "pre-heating" in ex.decide("madli", now=at(15.5)).label
+    away = store.away()
+    away.start, away.end = D0, D0 + timedelta(days=2)
+    store.set_away(away)
+    d = ex.decide("madli", now=at(15.5))
+    assert "pre-heating" not in d.label and d.setpoint == store.comfort().away.preferred
+
+
+def test_spike_over_midnight_is_one_spike(settings, db):
+    spot = [150] * 48
+    spot[23] = spot[24] = 600  # 23:00–01:00
+    db.upsert_prices([(int(at(h)), 60, float(spot[h])) for h in range(48)])
+    s = spike_settings(settings)
+    sp = spikes.active(s, db, at(24.5))
+    assert (sp.start, sp.end) == (int(at(23)), int(at(25)))
+    spikes.set_override(db, sp.start, True)  # "Keep heating" at 23:00 also covers 00:00–01:00
+    assert spikes.pausing(s, db, "madli", at(24.5)) is None
+    assert spikes.spike_hours(s, db, DAY + timedelta(days=1)) == set()
+
+
+async def test_floor_restored_when_spikes_switched_off(settings, db):
+    db.upsert_prices([(int(at(h)), 60, float(SPOT[h % 24])) for h in range(48)])
+    floor = FakeHeater("floor")
+    db.set_kv(spikes.FLOOR_KEY, json.dumps({"bathroom2": 27.0}))  # paused, then spikes were disabled
+    db.add_readings([Reading(int(at(16.5)), "device:bathroom2_floor", setpoint=5.0)])
+    off = spike_settings(settings, enabled=False)
+    ctl = spikes.SpikeController(off, db, {"bathroom2_floor": floor}, Phone(off, db))
+    await ctl.run(at(16.6))
+    assert floor.sent == [27.0] and json.loads(db.get_kv(spikes.FLOOR_KEY)) == {}
+
+
+async def test_floor_put_back_on_stop_and_paused_again_on_start(s, db):
+    floor = FakeHeater("floor")
+    db.add_readings([Reading(int(at(15)), "device:bathroom2_floor", setpoint=27.0)])
+    ctl = spikes.SpikeController(s, db, {"bathroom2_floor": floor}, Phone(s, db))
+    await ctl.run(at(16.01))
+    db.add_readings([Reading(int(at(16.05)), "device:bathroom2_floor", setpoint=5.0)])
+    await ctl._floors(at(16.1), stopping=True)  # the app stops mid-spike
+    assert floor.sent == [5, 27.0]
+    again = spikes.SpikeController(s, db, {"bathroom2_floor": floor}, Phone(s, db))  # restarted; reading still 5
+    await again.run(at(16.2))
+    assert floor.sent == [5, 27.0]  # still shows the minimum: not lowered again, and 27 is still the saved value
+    db.add_readings([Reading(int(at(16.3)), "device:bathroom2_floor", setpoint=27.0)])  # the restore shows up
+    await again.run(at(16.4))
+    assert floor.sent == [5, 27.0, 5]
+    db.add_readings([Reading(int(at(16.5)), "device:bathroom2_floor", setpoint=5.0)])
+    await again.run(at(19.01))
+    assert floor.sent == [5, 27.0, 5, 27.0]

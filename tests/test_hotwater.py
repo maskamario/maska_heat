@@ -210,3 +210,27 @@ def test_control_card_and_modes(settings, db):
         client.post("/control/all", data={"mode": "handsoff"})
         assert app.state.store.zone("hot_water").mode == "smart"  # "all rooms" leaves the water heater alone
         assert "heats " in client.get("/").text
+
+
+async def test_handback_writes_only_what_differs_and_resumes(rig):
+    hw, store, boiler, db, _ = rig
+    store.set_zone("hot_water", ZoneControl(mode="smart"))
+    await hw.run(NOW.timestamp())  # writes Tue + Wed and the range
+    boiler.writes.clear()
+    calls = 0
+    real = boiler.write
+
+    async def limited(cap, value):  # the rate limit hits after the first write
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("rate limited")
+        await real(cap, value)
+
+    boiler.write = limited
+    store.set_zone("hot_water", ZoneControl(mode="handsoff"))
+    await hw.run(NOW.timestamp() + 600)
+    assert hw.state()["engaged"] and list(hw.state()["restore_schedule"]) == ["2", "3", "4", "5", "6"]
+    await hw.run(NOW.timestamp() + 1200)  # continues with Wednesday, skips the untouched days
+    assert [c for c, _ in boiler.writes] == [CAP_SCHEDULE[1], CAP_SCHEDULE[2], CAP_RANGE]
+    assert not hw.state()["engaged"] and boiler.caps[CAP_SCHEDULE[2]] == "[[0,360],[1320,1440],[0,0]]"

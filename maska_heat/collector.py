@@ -174,19 +174,27 @@ class Collector:
             source, health = f"device:{name}", f"energy:{name}"
             try:
                 days = await adapter.energy_days(today - timedelta(days=ENERGY_DAYS - 1), today, self.tz)
-                self.db.upsert_energy(source, [(int(t.timestamp()), 24 * 60, kwh) for t, kwh in days])
-                for d in self._hourly_days_to_fetch(source, today):
-                    hours = await adapter.energy_hours(d, self.tz)
-                    self.db.upsert_energy(source, [(int(t.timestamp()), 60, kwh) for t, kwh in hours])
-                    if d < today - timedelta(days=1):
-                        self._energy_done.add((source, d))  # even if empty — don't ask again
             except Exception as e:
-                self._failed(health, e)
+                self._failed(health, e)  # health follows the daily figures, the authoritative ones
                 continue
+            self.db.upsert_energy(source, [(int(t.timestamp()), 24 * 60, kwh) for t, kwh in days])
             self._ok(health)
+            for d in self._hourly_days_to_fetch(source, today):
+                try:  # each day on its own: one day without hourly data must not stop the others
+                    hours = await adapter.energy_hours(d, self.tz)
+                except Exception as e:
+                    if d < today - timedelta(days=1):
+                        self._energy_done.add((source, d))  # no hourly data for it any more: don't ask again
+                    log.info("hourly energy of %s for %s not available: %s", name, d, e)
+                    continue
+                self.db.upsert_energy(source, [(int(t.timestamp()), 60, kwh) for t, kwh in hours])
+                if d < today - timedelta(days=1):
+                    self._energy_done.add((source, d))  # even if empty — don't ask again
 
     def _hourly_days_to_fetch(self, source: str, today: date) -> list[date]:
-        """Today and yesterday (still being corrected), plus earlier days in MELCloud's hourly window with no data."""
+        """Today and yesterday (still being corrected), plus earlier days in MELCloud's hourly window without a
+        complete hourly profile — a day fetched while it was still "today" (e.g. before downtime) has only its
+        first hours, and stretching those to the daily total would price the evening at morning prices."""
         days = [today, today - timedelta(days=1)]
         for back in range(2, ENERGY_HOURLY_DAYS):
             d = today - timedelta(days=back)
@@ -194,7 +202,7 @@ class Collector:
                 continue
             start = datetime.combine(d, datetime.min.time(), self.tz)
             rows = self.db.energy(source, int(start.timestamp()), int((start + timedelta(days=1)).timestamp()))
-            if any(r["minutes"] == 60 for r in rows):
+            if sum(1 for r in rows if r["minutes"] == 60) >= 23:  # 23 on the spring DST day
                 self._energy_done.add((source, d))
             else:
                 days.append(d)
@@ -226,6 +234,8 @@ class Collector:
                 self._ok(source)
             elif not sensor.connected and sensor.last_error:  # not yet tried is not a failure
                 self._failed(source, sensor.last_error or "not connected")
+            elif sensor.updated_at:  # connected but silent (the room sensors report every minute)
+                self._failed(source, f"no reading for {int((now - sensor.updated_at) // 60)} min")
         self.db.add_readings(rows)
 
     async def update_prices(self, force: bool = False) -> None:

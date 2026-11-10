@@ -24,7 +24,7 @@ from .control import ControlStore, ZoneControl
 from .dashboard import zone_view
 from .db import Database
 from .jobs import Jobs
-from .schedule import MODE_LABEL, Snapshot, SmartTarget, smart_target
+from .schedule import MODE_LABEL, Snapshot, SmartTarget, slot_at, smart_target
 from . import spike
 from .settings import Settings
 
@@ -38,6 +38,7 @@ OFFSET_KEY = "room_offset"  # kv: zone -> {"offset": °C, "ts"}: the last measur
 OFFSET_MAX_AGE = 24 * 3600
 OFFSET_REFRESH = 10 * 60
 SAFETY_HYSTERESIS = 0.5  # °C above spike.safety_min_temp before a room heating for safety pauses again
+PREHEAT_KEY = "preheat_for"  # kv: zone -> ISO time of the slot being pre-heated for
 TRIM_KEY = "room_trim_v2"  # kv: zone -> {"trim": °C, "ts": last update} (v1 wound up overnight: discarded)
 TRIM_GAIN = 1.5  # °C of heater setpoint per °C of room error per hour
 TRIM_MAX = 1.5
@@ -100,7 +101,10 @@ class Executor:
         self._locks: dict[str, asyncio.Lock] = {}
         self._blocked_noted: dict[str, str] = {}
         self._mill_taken: set[str] = set()  # Mills switched to 'Control individually' since this process started
-        self._preheating_for: dict[str, datetime] = {}  # zone -> start of the slot being pre-heated for
+        # zone -> start of the slot being pre-heated for; kept in kv so a restart mid-pre-heat doesn't flip-flop
+        self._preheating_for: dict[str, datetime] = {
+            k: datetime.fromisoformat(v) for k, v in json.loads(db.get_kv(PREHEAT_KEY) or "{}").items()
+        }
         self._safety: set[str] = set()  # zones heating through a spike because the room fell below the limit
         self.jobs = Jobs()
 
@@ -178,6 +182,8 @@ class Executor:
                 d.setpoint, d.heater_units, d.label = self.devices[zone.device].capabilities.setpoint_min, True, label
             return d
         ahead = spike.preheating(self.settings, self.db, zone_key, now)
+        if ahead and slot_at(zone_key, datetime.fromtimestamp(ahead.start, self.tz), snap).mode not in ("day", "night"):
+            ahead = None  # nobody home during the spike (Away, Out): stored heat would buy nothing
         if ahead and band.max > target.setpoint:
             d.setpoint, d.learn = band.max, False
             d.label = f"pre-heating before the price spike at {datetime.fromtimestamp(ahead.start, self.tz):%H:%M}"
@@ -331,7 +337,7 @@ class Executor:
         ctl = self.store.zone(zone_key)
 
         if ctl.mode == "handsoff":
-            self._preheating_for.pop(zone_key, None)
+            self._set_preheat(zone_key, None)
             if ctl.engaged:
                 await self._release(zone_key, adapter, ctl)
             return
@@ -343,10 +349,7 @@ class Executor:
             self._safety.add(zone_key)
         else:
             self._safety.discard(zone_key)
-        if decision.smart and decision.smart.preheat_for:
-            self._preheating_for[zone_key] = decision.smart.preheat_for
-        else:
-            self._preheating_for.pop(zone_key, None)
+        self._set_preheat(zone_key, decision.smart.preheat_for if decision.smart else None)
         if decision.blocked:
             if self._blocked_noted.get(zone_key) != decision.blocked:
                 self._blocked_noted[zone_key] = decision.blocked
@@ -374,9 +377,13 @@ class Executor:
             self.db.add_event("info", f"control:{zone_key}", f"{zone.name}: set {target:.1f} °C ({self._label(decision)})")
             return
         pending = self._pending.get(zone_key)
-        if pending and pending[0] == target and time.time() - pending[1] < PENDING_SECONDS:
-            return
-        if latest["setpoint"] is not None and abs(latest["setpoint"] - target) < 0.05:
+        reported = latest["setpoint"]
+        if pending and time.time() - pending[1] < PENDING_SECONDS and (reported is None or abs(reported - pending[0]) >= 0.05):
+            # our last write hasn't shown up yet (Adax cloud ~5 min): the device is heading for that value, not
+            # for the one it still reports — so compare with it
+            if pending[0] == target:
+                return
+        elif reported is not None and abs(reported - target) < 0.05:
             return
 
         if self._device_type(zone_key) == "mill_local":
@@ -384,6 +391,15 @@ class Executor:
         await adapter.set_setpoint(target)
         self._pending[zone_key] = (target, time.time())
         self.db.add_event("info", f"control:{zone_key}", f"{zone.name}: set {target:.1f} °C ({self._label(decision)})")
+
+    def _set_preheat(self, zone_key: str, at: datetime | None) -> None:
+        if self._preheating_for.get(zone_key) == at:
+            return
+        if at is None:
+            self._preheating_for.pop(zone_key, None)
+        else:
+            self._preheating_for[zone_key] = at
+        self.db.set_kv(PREHEAT_KEY, json.dumps({k: v.isoformat() for k, v in self._preheating_for.items()}))
 
     @staticmethod
     def _label(decision: ZoneDecision) -> str:

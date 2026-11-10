@@ -88,7 +88,9 @@ class AdaxCloudAdapter:
         room = self._pick_room(content)
         self._room_id = room["id"]
         devices = [d for d in content.get("devices") or [] if d.get("roomId") == room["id"]]
-        energy_wh = sum(d.get("energyWh") or 0 for d in devices) if devices else None
+        # energy so far this hour; unknown (not 0) if any heater in the room didn't report it
+        wh = [d.get("energyWh") for d in devices]
+        energy_wh = sum(wh) if wh and all(w is not None for w in wh) else None
         enabled = room.get("heatingEnabled")
         return DeviceState(
             room_temp=from_centi(room.get("temperature")),

@@ -123,7 +123,8 @@ def smart_target(
             if s.setpoint > current.setpoint + 0.05:
                 need = max(s.setpoint - start_temp, 0.0)
                 lead_h = min(need / rate + LEAD_MARGIN_HOURS, MAX_LEAD_HOURS)
-                if begins == preheating_for or (begins - now).total_seconds() / 3600 <= lead_h:
+                # real hours (timestamps): a wall-clock difference is an hour off across a DST change
+                if begins == preheating_for or (begins.timestamp() - now.timestamp()) / 3600 <= lead_h:
                     preheat = (begins, s)
         prev_t, prev = t, slot_at(zone, t, snap)
         t += STEP

@@ -28,9 +28,10 @@ def _tenths(dps: dict[str, Any], dp: str) -> float | None:
     return None if v is None else round(v / 10, 1)
 
 
-def parse_status(dps: dict[str, Any]) -> DeviceState:
+def parse_status(dps: dict[str, Any], sensor_mode: str | None = None) -> DeviceState:
+    """`sensor_mode`: the last known DP 116, for a reply that leaves it out (else floor and air would swap)."""
     controlled = _tenths(dps, DP_TEMP)
-    on_floor = dps.get(DP_SENSOR) == "ext"
+    on_floor = dps.get(DP_SENSOR, sensor_mode) == "ext"
     return DeviceState(
         room_temp=None if on_floor else controlled,
         setpoint=_tenths(dps, DP_SETPOINT),
@@ -64,6 +65,7 @@ class TuyaThermostatAdapter:
         self.host = host
         self._device = device
         self._lock = asyncio.Lock()  # these thermostats accept one local connection at a time
+        self._sensor_mode: str | None = None  # last DP 116 seen: which sensor DP 24 belongs to
 
     async def read(self) -> DeviceState:
         async with self._lock:
@@ -71,7 +73,8 @@ class TuyaThermostatAdapter:
         if not isinstance(status, dict) or "Error" in status or "dps" not in status:
             err = status.get("Error") if isinstance(status, dict) else status
             raise DeviceError(f"Tuya {self.host}: {err or 'no answer'}")
-        state = parse_status(status["dps"])
+        self._sensor_mode = status["dps"].get(DP_SENSOR, self._sensor_mode)
+        state = parse_status(status["dps"], self._sensor_mode)
         if status["dps"].get(DP_FAULT):
             state.mode = f"{state.mode} fault {status['dps'][DP_FAULT]}"
         return state

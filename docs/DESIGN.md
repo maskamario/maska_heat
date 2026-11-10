@@ -389,6 +389,8 @@ The heat pump is naturally favoured and prefers warmer hours (better COP).
 | Away | house Away | Eco minimum |
 
 Hard **mold-prevention minimum** (floor ≥ ~20 °C, TBD) always applies — never lower even during Extreme prices.
+(Planned, not built. Today the only thing that lowers the floor is the price-spike pause of §10.1 — at most 3 h a
+day, to the thermostat's minimum — so the floor cools for a few hours but does not stay cold.)
 Floors have high thermal mass, so Comfort periods are pre-heated in cheap hours. Optional later: humidity sensor
 → drying boost after showers.
 
@@ -584,14 +586,18 @@ days (e.g. 9.11: 16:00–19:00 at up to 50 c/kWh). Zones in `spike.zones` (bedro
 the heat pump) **use no electricity** during a spike unless overridden:
 - Rooms in Smart: setpoint → the heater's minimum (5 °C); a room below `safety_min_temp` (18 °C, room sensor —
   while it is silent, the heater's sensor corrected by the last known gap) gets its comfort min instead, until it is
-  0.5 °C above the limit again (no flip-flopping around 18). The hour before, if cheaper than the spike, they pre-heat
-  to the comfort max. Manual and Hands-off are left alone and are not listed as paused.
+  0.5 °C above the limit again (no flip-flopping around 18). The hour before, if cheaper than the spike and someone
+  is home during it (Day or Night at the spike start, not Away/Out), they pre-heat to the comfort max. Manual and
+  Hands-off are left alone and are not listed as paused.
 - Floor thermostat (otherwise logged only): setpoint → 5 °C, restored afterwards unless someone changed it meanwhile.
+  The saved setpoint (kv `spike_floor`) is put back whatever the config says by then (spikes switched off, zone
+  removed), and also when the app stops; on a restart mid-spike it is paused again.
 - Water heater: spike hours are left out of its windows; no boost during a spike.
 
 `notify_before_min` (60) before a spike, an ntfy message lists what pauses, with a **Keep heating** button (HTTP
 POST to `notify.app_url`/spike/<start>/override) and the dashboard shows a banner with the same override / "Pause
-again". A spike counts as warned only once the message went out: during quiet hours the warning waits (a 07:00 spike
+again". A spike running over midnight (23:00–01:00) is one spike: one warning, one override. A spike counts as warned only
+once the message went out: during quiet hours the warning waits (a 07:00 spike
 is announced at 06:30) and a failed send is retried every 5 min. Nothing to pause (all in Manual / Hands-off) → no
 message. The spike job runs every minute and nudges the executor and the water heater at start, end and override;
 its parts run independently, so one failing never stops the floor restore. The water heater's planner never merges
@@ -620,12 +626,18 @@ not on the remembered gap. The first version lacked the idle check: overnight on
 9–10.11 the rooms cooled slowly towards the Night target with the heaters off, it learned −2.3/−3.0 °C, and the next day
 held both bedrooms about 2 °C below target; those values were discarded (new kv key).
 
-- Every 5 min: apply slot setpoint per zone **only if changed**; read back to confirm.
-- Never power devices on/off. Device found off → skip zone, notify once.
-- Fallbacks: no prices → schedule `preferred`; low-confidence model → conservative; device offline → device
-  keeps last setpoint (always ≥ some mode min) + notify; measured < min − 0.5 → force `preferred`.
-- Graceful shutdown → every zone to schedule `preferred`; Mill back to "Weekly program".
-- Absolute limits: air 10–26 °C (and device range); floor per material limit.
+Built:
+- Every 5 min: apply the decision per zone **only if changed** (compared with a write the cloud has not confirmed
+  yet, if there is one — not with the value the Adax still reports).
+- Never power devices on/off. Device found off or without a fresh reading → zone not changed, noted once in events.
+- Graceful shutdown: Mill back to "Weekly program"; a floor paused for a spike back to its setpoint. Others keep
+  their last setpoint.
+- Background jobs run through `jobs.Jobs`: a crashing job is logged and keeps its schedule; shutdown cancels and
+  waits for every job and triggered task before devices are released.
+
+Planned, not built yet: notify on a switched-off device; "measured < min − 0.5 → force `preferred`"; absolute air
+limits 10–26 °C (today only the device range limits a setpoint — with room offset and trim a heater setpoint can be
+up to ~7 °C above the room target); floor per material limit.
 - **Season**: Heating (active) / Off (log only). Suggests switching from the 7-day forecast.
 
 ---

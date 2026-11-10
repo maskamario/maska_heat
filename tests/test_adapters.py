@@ -98,3 +98,17 @@ async def test_adax_unknown_room():
     adax = AdaxCloudAdapter("1", "s", room_name="Nope", client=httpx.AsyncClient(transport=httpx.MockTransport(adax_handler([]))))
     with pytest.raises(DeviceError, match="Madli"):
         await adax.read()
+
+
+async def test_adax_missing_energy_is_unknown_not_zero():
+    content = {
+        "rooms": [{"id": 2, "name": "Madli", "temperature": 2150, "targetTemperature": 2100, "heatingEnabled": True}],
+        "devices": [{"id": 9, "roomId": 2}],  # no energyWh in this reply
+    }
+    a = AdaxCloudAdapter("1", "x", room_name="Madli")
+
+    async def fake_content():
+        return content
+
+    a.content = fake_content
+    assert (await a.read()).energy_kwh is None

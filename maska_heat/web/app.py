@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -19,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from .. import __version__
 from ..collector import Collector
 from ..control import COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, ControlStore, DateRange, HouseSchedule, KidSchool, SchoolDay
-from ..dashboard import as_dict, history, upcoming_prices, zone_views
+from ..dashboard import HISTORY_MAX_HOURS, as_dict, history, upcoming_prices, zone_view, zone_views
 from ..db import Database
 from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
 from ..executor import Executor, describe_mode, zone_modes
@@ -59,6 +60,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     templates.env.filters["cents"] = lambda eur_kwh: "—" if eur_kwh is None else f"{eur_kwh * 100:.1f}"
     templates.env.filters["hhmm"] = lambda t: "" if t is None else t.strftime("%H:%M")
     templates.env.globals["mode_name"] = describe_mode
+    templates.env.globals["tz_name"] = settings.location.timezone  # charts show the house's time, not the phone's
     templates.env.globals["comfort_label"] = MODE_LABEL
     # Cache-busting token for static files: changes whenever a static file changes
     templates.env.globals["static_v"] = int(max(f.stat().st_mtime for f in (HERE / "static").iterdir()))
@@ -89,7 +91,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             spikes.SpikeController(
                 settings, app.state.db, app.state.collector.devices, app.state.notifier, spike_changed, app.state.store
             )
-            if settings.spike and settings.spike.enabled
+            if settings.spike  # also when disabled: it puts back a floor paused before
             else None
         )
         if start_jobs:
@@ -193,7 +195,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         }
 
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard(request: Request):
+    def dashboard(request: Request):
         ctx = status_context(request) | fires_context(request)
         ctx["events"] = _db(request).events(15)
         ctx["prices_json"] = [as_dict(p) for p in ctx["prices"]]
@@ -201,12 +203,14 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         return templates.TemplateResponse(request, "dashboard.html", ctx)
 
     @app.get("/partials/status", response_class=HTMLResponse)
-    async def status_partial(request: Request):
+    def status_partial(request: Request):
         return templates.TemplateResponse(request, "_status.html", status_context(request))
 
     @app.get("/history", response_class=HTMLResponse)
-    async def history_page(request: Request, zone: str | None = None, hours: int = 48):
-        zone = zone or next(iter(settings.zones), None)
+    def history_page(request: Request, zone: str | None = None, hours: int = 48):
+        if zone not in settings.zones:
+            zone = next(iter(settings.zones), None)
+        hours = min(max(hours, 1), HISTORY_MAX_HOURS)
         return templates.TemplateResponse(
             request, "history.html", {"request": request, "zones": settings.zones, "zone": zone, "hours": hours}
         )
@@ -216,7 +220,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         if stove not in STOVES:
             raise HTTPException(400, "unknown stove")
         db = _db(request)
-        db.add_fire(stove, int(time.time()) - max(0, minutes_ago) * 60, loads=2)
+        minutes_ago = min(max(0, minutes_ago), 24 * 60)
+        db.add_fire(stove, int(time.time()) - minutes_ago * 60, loads=2)
         db.add_event("info", "fire", f"{STOVES[stove]} lit" + (f" {minutes_ago} min ago" if minutes_ago else ""))
         return templates.TemplateResponse(request, "_fires.html", fires_context(request))
 
@@ -236,14 +241,13 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     # control ------------------------------------------------------------------
 
     def zone_card_context(request: Request, zone_key: str) -> dict:
-        views = {v.key: v for v in zone_views(settings, _db(request), time.time())}
         dev = settings.zones[zone_key].device
         decision = _executor(request).decide(zone_key)
         return {
             "request": request,
             "key": zone_key,
             "zone": settings.zones[zone_key],
-            "view": views[zone_key],
+            "view": zone_view(settings, _db(request), zone_key, time.time()),
             "ctl": _store(request).zone(zone_key),
             "decision": decision,
             "controllable": bool(dev) and dev in request.app.state.collector.devices and decision.mode != "logging",
@@ -254,9 +258,10 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
 
     def hot_water_card(request: Request) -> dict:
         today = datetime.now(tz).date()
+        plan = hot_water_plan(settings, _db(request), today)
         tomorrow = hot_water_plan(settings, _db(request), today + timedelta(days=1))
         return {
-            "today": describe_windows(hot_water_plan(settings, _db(request), today) or []),
+            "today": describe_windows(plan) if plan is not None else None,
             "tomorrow": describe_windows(tomorrow) if tomorrow is not None else None,
             "hours": settings.hot_water.hours_per_day,
             "boost_below": settings.hot_water.boost_below_pct,
@@ -301,7 +306,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         _db(request).add_event("info", f"control:{zone_key}", f"{settings.zones[zone_key].name}: mode → {describe_mode(mode)}")
 
     @app.get("/control", response_class=HTMLResponse)
-    async def control_page(request: Request, error: str | None = None):
+    def control_page(request: Request, error: str | None = None):
         return templates.TemplateResponse(request, "control.html", control_context(request, error))
 
     @app.post("/control/all")
@@ -328,8 +333,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         ctl = store.zone(zone_key)
         base = ctl.manual_setpoint if ctl.manual_setpoint is not None else store.comfort().day.preferred
         value = base + delta if delta is not None else setpoint
-        if value is None:
-            raise HTTPException(400, "setpoint missing")
+        if value is None or not math.isfinite(value):
+            raise HTTPException(400, "setpoint missing or not a number")
         lo, hi = SETPOINT_RANGE
         ctl.manual_setpoint = round(min(max(value, lo), hi) * 2) / 2
         store.set_zone(zone_key, ctl)
@@ -457,11 +462,12 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         return _back(saved="school")
 
     @app.post("/settings/holidays/delete")
-    async def delete_holiday(request: Request, index: int = Form(...)):
+    async def delete_holiday(request: Request, start: date = Form(...), end: date = Form(...)):
         store = _store(request)
         school = store.school()
-        if 0 <= index < len(school.holidays):
-            del school.holidays[index]
+        kept = [h for h in school.holidays if (h.start, h.end) != (start, end)]
+        if len(kept) != len(school.holidays):
+            school.holidays = kept
             store.set_school(school)
             _apply(request)
         return _back(saved="school")
@@ -469,7 +475,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
     # JSON API -----------------------------------------------------------------
 
     @app.get("/api/status")
-    async def api_status(request: Request):
+    def api_status(request: Request):
         ctx = status_context(request)
         return {
             "zones": [as_dict(z) for z in ctx["zones"]],
@@ -478,14 +484,14 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         }
 
     @app.get("/api/prices")
-    async def api_prices(request: Request):
+    def api_prices(request: Request):
         return [as_dict(p) for p in upcoming_prices(settings, _db(request), time.time())]
 
     @app.get("/api/history")
-    async def api_history(request: Request, zone: str, hours: int = 48):
+    def api_history(request: Request, zone: str, hours: int = 48):
         if zone not in settings.zones:
             raise HTTPException(404, "unknown zone")
-        return JSONResponse(history(settings, _db(request), zone, min(max(hours, 1), 24 * 31), time.time()))
+        return JSONResponse(history(settings, _db(request), zone, min(max(hours, 1), HISTORY_MAX_HOURS), time.time()))
 
     def _spike_override(request: Request, start: int, on: bool):
         if not any(s.start == start for s in spikes.spikes_around(settings, _db(request), time.time())):
@@ -506,7 +512,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         return _spike_override(request, start, False)
 
     @app.get("/energy", response_class=HTMLResponse)
-    async def energy_page(request: Request, period: str = "today"):
+    def energy_page(request: Request, period: str = "today"):
         if period not in PERIODS:
             period = "today"
         e = energy_summary(settings, _db(request), period, time.time())
@@ -517,7 +523,7 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         )
 
     @app.get("/api/energy")
-    async def api_energy(request: Request, period: str = "today"):
+    def api_energy(request: Request, period: str = "today"):
         if period not in PERIODS:
             raise HTTPException(400, "unknown period")
         return JSONResponse(energy_json(energy_summary(settings, _db(request), period, time.time())))

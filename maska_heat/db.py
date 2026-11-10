@@ -134,7 +134,8 @@ class Database:
             old_version = self._conn.execute("PRAGMA user_version").fetchone()[0]
             self._conn.executescript(SCHEMA)
             self._migrate(old_version)
-            self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            # never lower it: a newer build may have run on this database
+            self._conn.execute(f"PRAGMA user_version={max(old_version, SCHEMA_VERSION)}")
 
     def _migrate(self, old_version: int = 0) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(readings)")}
@@ -144,11 +145,16 @@ class Database:
             self._conn.execute("ALTER TABLE readings ADD COLUMN floor_temp REAL")
         if "level_pct" not in cols:  # added in schema 6
             self._conn.execute("ALTER TABLE readings ADD COLUMN level_pct REAL")
-        if 5 <= old_version < 7:
+        done = self._conn.execute("SELECT 1 FROM kv WHERE key='migrated_floor_temp'").fetchone()
+        if 5 <= old_version < 7 and not done:
             # Schema 5-6 logged a floor thermostat's calibrated floor reading as temp and the raw sensor as
             # floor_temp. Only floor thermostats (on their floor sensor) wrote floor_temp.
             self._conn.execute(
                 "UPDATE readings SET floor_temp = temp, temp = NULL WHERE floor_temp IS NOT NULL AND temp IS NOT NULL"
+            )
+        if not done:  # once only, even if an older build later resets user_version to 6
+            self._conn.execute(
+                "INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES ('migrated_floor_temp', '1', strftime('%s','now'))"
             )
 
     def close(self) -> None:
@@ -195,7 +201,13 @@ class Database:
     def count_readings(self, source: str, since: int, until: int) -> int:
         return self._all("SELECT COUNT(*) AS n FROM readings WHERE source=? AND ts>=? AND ts<?", (source, since, until))[0]["n"]
 
-    def readings(self, source: str, since: int, until: int | None = None) -> list[sqlite3.Row]:
+    def readings(self, source: str, since: int, until: int | None = None, step: int = 0) -> list[sqlite3.Row]:
+        """Readings in [since, until); with `step`, only the first reading of each `step`-second bucket."""
+        if step:  # SQLite returns the bare columns of the row that holds MIN(ts)
+            return self._all(
+                "SELECT *, MIN(ts) AS ts FROM readings WHERE source=? AND ts>=? AND ts<? GROUP BY ts / ? ORDER BY ts",
+                (source, since, until or 2**62, step),
+            )
         return self._all(
             "SELECT * FROM readings WHERE source=? AND ts>=? AND ts<? ORDER BY ts",
             (source, since, until or 2**62),

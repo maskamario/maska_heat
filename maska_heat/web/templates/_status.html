@@ -66,7 +66,7 @@
     <dl>
       {% set d = decisions[z.key] %}
       {% if d.room_target is not none %}
-      <div><dt>Target</dt><dd>{{ "%.1f" | format(d.room_target) }} °C <span class="muted">(heater {{ "%.0f" | format(z.setpoint) if z.setpoint is not none else "—" }})</span></dd></div>
+      <div><dt>Target</dt><dd>{{ "%.1f" | format(d.room_target) }} °C <span class="muted">(heater {{ "%.1f" | format(z.setpoint) if z.setpoint is not none else "—" }})</span></dd></div>
       {% else %}
       <div><dt>Setpoint</dt><dd>{% if z.setpoint is not none %}{{ "%.1f" | format(z.setpoint) }} °C{% else %}—{% endif %}</dd></div>
       {% endif %}

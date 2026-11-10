@@ -79,7 +79,7 @@
       <li>
         <span>{{ h.start.strftime("%d.%m.%Y") }} – {{ h.end.strftime("%d.%m.%Y") }}</span>
         <form method="post" action="/settings/holidays/delete" class="push-right">
-          <input type="hidden" name="index" value="{{ loop.index0 }}"><button type="submit" class="link">remove</button>
+          <input type="hidden" name="start" value="{{ h.start.isoformat() }}"><input type="hidden" name="end" value="{{ h.end.isoformat() }}"><button type="submit" class="link">remove</button>
         </form>
       </li>
     {% else %}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-tz="{{ tz_name }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,8 +10,10 @@
   <meta name="theme-color" content="#c2410c">
   <meta name="mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  {# Served from the Pi (not a CDN): the controls must work when the internet is down but the LAN is up.
+     htmx.org 1.9.12 dist/htmx.min.js, chart.js 4.4.4 dist/chart.umd.js — checked against jsDelivr's sha256. #}
+  <script src="/static/vendor/htmx.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/chart.umd.js?v={{ static_v }}"></script>
   <script src="/static/app.js?v={{ static_v }}" defer></script>
 </head>
 <body>
