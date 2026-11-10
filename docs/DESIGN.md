@@ -604,10 +604,13 @@ the room on target whatever the door does. Without a fresh room sensor (10 min) 
 goes to the heater as before. The spike pause (heater minimum) is a heater value and is not shifted.
 The gap is not constant, though: while the Adax heats, its own sensor reads lower (it draws cold air in at the bottom),
 so on 9.11 the room settled 0.4–0.6 °C below target with the door closed. An integral **trim** fixes the rest: every
-control cycle, `trim += 1.5 × (room target − room mean over 10 min) × hours since last cycle`, capped at ±3 °C and kept
-in kv `room_trim`, added to the heater setpoint. It learns only while the room is within 1 °C of the target (no wind-up
-while warming up after a target change), not at the heater's limits, and not during the spike pause or without a room
-sensor.
+control cycle, `trim += 1.5 × (room target − room mean over 10 min) × hours since last cycle`, capped at ±1.5 °C and kept
+in kv `room_trim_v2`, added to the heater setpoint. It learns only while the room is within 1 °C of the target (no
+wind-up while warming up after a target change), only while the heater can act on the error — "too warm" not while the
+heater is already idle (its sensor > its setpoint + 0.5), "too cold" not while it runs flat out (sensor < setpoint − 0.5)
+— and not during the spike pause or without a room sensor. The first version lacked the idle check: overnight on
+9–10.11 the rooms cooled slowly towards the Night target with the heaters off, it learned −2.3/−3.0 °C, and the next day
+held both bedrooms about 2 °C below target; those values were discarded (new kv key).
 
 - Every 5 min: apply slot setpoint per zone **only if changed**; read back to confirm.
 - Never power devices on/off. Device found off → skip zone, notify once.

@@ -33,11 +33,12 @@ RUN_SECONDS = 5 * 60
 OFFSET_WINDOW = 20 * 60  # heater-vs-room gap: median over this long
 ROOM_SENSOR_FRESH = 10 * 60
 MAX_OFFSET = 6.0  # a bigger gap is implausible: fall back to the heater's own sensor
-TRIM_KEY = "room_trim"  # kv: zone -> {"trim": °C, "ts": last update}
+TRIM_KEY = "room_trim_v2"  # kv: zone -> {"trim": °C, "ts": last update} (v1 wound up overnight: discarded)
 TRIM_GAIN = 1.5  # °C of heater setpoint per °C of room error per hour
-TRIM_MAX = 3.0
+TRIM_MAX = 1.5
 TRIM_BAND = 1.0  # only learn while the room is within this of the target (not while warming up after a change)
 TRIM_MAX_STEP = 15 * 60  # longest gap counted between two updates
+TRIM_CYCLING = 0.5  # the heater is cycling (not idle or flat out) while its sensor is within this of its setpoint
 PENDING_SECONDS = 10 * 60  # don't re-send the same value within this time
 FRESH_READING_SECONDS = 15 * 60
 
@@ -151,7 +152,9 @@ class Executor:
 
         The heater-vs-room gap alone leaves the room a few tenths off, because the gap changes while the
         heater runs. Learns only while the room is near the target (no wind-up after a target change) and
-        not while the heater is already at its limit.
+        only while the heater can act on it: a too-warm room is not learned while the heater is already
+        idle (its sensor above its setpoint: the room is just cooling down, e.g. overnight), and a too-cold
+        room not while the heater already runs flat out (its sensor well below its setpoint).
         """
         trims = self._trims()
         entry = trims.get(zone_key, {"trim": 0.0, "ts": now})
@@ -162,9 +165,16 @@ class Executor:
         room = room_temp(self.db, sensor, now)
         if d.room_target is not None and d.offset is not None and room is not None:
             error = d.room_target - room
-            caps = self.devices[zone.device].capabilities
-            at_limit = (error > 0 and d.setpoint >= caps.setpoint_max) or (error < 0 and d.setpoint <= caps.setpoint_min)
-            if abs(error) <= TRIM_BAND and not at_limit:
+            heater = self.db.latest_reading(f"device:{zone.device}")
+            h_temp = heater["temp"] if heater else None
+            h_set = heater["setpoint"] if heater else None
+            if h_temp is None or h_set is None:
+                acting = False
+            elif error < 0:
+                acting = h_temp <= h_set + TRIM_CYCLING  # still heating at least part of the time
+            else:
+                acting = h_temp >= h_set - TRIM_CYCLING  # not yet running flat out
+            if abs(error) <= TRIM_BAND and acting:
                 entry["trim"] = max(-TRIM_MAX, min(TRIM_MAX, entry["trim"] + TRIM_GAIN * error * dt / 3600))
         trims[zone_key] = entry
         self.db.set_kv(TRIM_KEY, json.dumps(trims))

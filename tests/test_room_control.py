@@ -128,12 +128,35 @@ def test_feedback_raises_heater_when_room_stays_low(rig):
 def test_feedback_lowers_heater_when_room_stays_high(rig):
     ex, store, db = rig
     store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
-    history(db, room=20.6, heater=17.6, setpoint=17.0, minutes=90, end=NOW + 3600)  # gap −3 → heater 17, room 0.6 high
+    history(db, room=20.6, heater=17.4, setpoint=17.0, minutes=90, end=NOW + 3600)  # gap −3.2 → heater 17 and cycling, room 0.6 high
     for k in range(13):
         t = NOW + 300 * k
         ex.update_trim("madli", ex.decide("madli", now=t), t)
     assert ex.trim("madli") == pytest.approx(-0.6 * 1.5, abs=0.01)
     assert ex.decide("madli", now=NOW + 3600).setpoint == 16.0
+
+
+def test_no_learning_while_room_just_cools_down(rig):
+    """10.11 night: the room cooled from 22 to 20 °C towards its Night target with the heater idle.
+
+    v1 learned −2.3 °C from that and the next day held the room 2 °C below target."""
+    ex, store, db = rig
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=20.0))
+    history(db, room=20.6, heater=18.0, setpoint=17.0, minutes=90, end=NOW + 3600)  # heater 1 °C above its setpoint: idle
+    for k in range(13):
+        t = NOW + 300 * k
+        ex.update_trim("madli", ex.decide("madli", now=t), t)
+    assert ex.trim("madli") == 0.0
+
+
+def test_no_learning_while_heater_runs_flat_out(rig):
+    ex, store, db = rig
+    store.set_zone("madli", ZoneControl(mode="manual", manual_setpoint=22.0))
+    history(db, room=21.4, heater=17.5, setpoint=19.0, minutes=90, end=NOW + 3600)  # warming up: heater far below its setpoint
+    for k in range(13):
+        t = NOW + 300 * k
+        ex.update_trim("madli", ex.decide("madli", now=t), t)
+    assert ex.trim("madli") == 0.0
 
 
 def test_feedback_does_not_wind_up(rig):
