@@ -17,6 +17,8 @@
 <p class="notice">Away until {{ away.end.strftime("%a %d.%m %H:%M") }} — <a href="/control">change</a></p>
 {% endif %}
 
+{% include "_wfh.html" %}
+
 {% if not tariff_configured %}
 <p class="notice">Network tariff not configured — costs show spot price + VAT only. Set <code>tariff</code> in config.yaml.</p>
 {% endif %}

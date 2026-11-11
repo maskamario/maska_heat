@@ -1,4 +1,4 @@
-"""UI-editable control settings: comfort bands, schedules, away period and per-zone control mode.
+"""UI-editable control settings: comfort bands, schedules, away period, working-from-home mode and per-zone control mode.
 
 Stored as JSON documents in the `kv` table, so changes from the UI apply without a restart.
 Defaults follow docs/DESIGN.md §5.
@@ -114,6 +114,25 @@ class Away(BaseModel):
         return self.start is not None and self.end is not None and self.start <= t < self.end
 
 
+class WorkFromHome(BaseModel):
+    """Working-from-home mode (executor: the bedrooms heat the hall through their open doors)."""
+
+    target: float = 21.5  # hall temperature aimed at
+    max_bedroom: float = 24.0  # the highest temperature a bedroom is asked for while the hall is too cold
+    end_time: time = time(17, 0)  # default end of the workday
+    until: datetime | None = None  # on until then; None = off
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "WorkFromHome":
+        lo, hi = SETPOINT_RANGE
+        if not (lo <= self.target <= self.max_bedroom <= hi):
+            raise ValueError(f"need {lo} ≤ hall target ≤ bedroom maximum ≤ {hi}")
+        return self
+
+    def active_at(self, t: datetime) -> bool:
+        return self.until is not None and t < self.until
+
+
 class ZoneControl(BaseModel):
     mode: ControlMode = "handsoff"
     manual_setpoint: float | None = None
@@ -160,6 +179,12 @@ class ControlStore:
 
     def set_away(self, a: Away) -> None:
         self._set("away", a)
+
+    def work_from_home(self) -> WorkFromHome:
+        return self._get("work_from_home", WorkFromHome, WorkFromHome())
+
+    def set_work_from_home(self, w: WorkFromHome) -> None:
+        self._set("work_from_home", w)
 
     def home_today(self) -> dict[str, date]:
         raw = self.db.get_kv("home_today")

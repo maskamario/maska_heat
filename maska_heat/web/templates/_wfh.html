@@ -1,0 +1,53 @@
+{# Working-from-home panel (dashboard and Control). `wfh` from wfh_context; `wfh_next` = the page to return to. #}
+{% if wfh %}
+<section class="card wfh {{ 'is-on' if wfh.active else '' }}" id="wfh">
+  <header class="card-head">
+    <h2>Working from home</h2>
+    {% if wfh.active %}
+      <span class="badge hot">on until {{ wfh.until.strftime("%H:%M") }}</span>
+    {% else %}
+      <span class="muted">The bedrooms heat the {{ wfh.hall_name | lower }} through their open doors</span>
+    {% endif %}
+  </header>
+
+  <dl class="plan">
+    <div>
+      <dt>{{ wfh.hall_name }}</dt>
+      <dd>
+        {% if wfh.hall is not none %}{{ "%.1f" | format(wfh.hall) }}&nbsp;°C now{% else %}<span class="warn">sensor silent</span>{% endif %}
+        · target {{ "%.1f" | format(wfh.target) }}&nbsp;°C
+      </dd>
+    </div>
+    {% for r in wfh.rooms %}
+    <div>
+      <dt>{{ r.name }}</dt>
+      <dd>
+        {% if r.door is sameas true %}door open{% elif r.door is sameas false %}<span class="{{ 'warn' if wfh.active else '' }}">door closed</span>{% else %}door unknown{% endif %}
+        {% if r.note and (wfh.active or not r.helps) and not (r.door is sameas false and not wfh.active) %} · {{ r.note }}{% endif %}
+      </dd>
+    </div>
+    {% endfor %}
+  </dl>
+
+  {% if wfh.active %}
+    {% if wfh.idle %}<p class="warn small">Nothing is heating the {{ wfh.hall_name | lower }} right now — see the bedrooms above.</p>{% endif %}
+    <form method="post" action="/work-from-home/stop">
+      <input type="hidden" name="next" value="{{ wfh_next }}">
+      <button type="submit">End working from home</button>
+    </form>
+  {% else %}
+    <form method="post" action="/work-from-home" class="form-row">
+      <input type="hidden" name="next" value="{{ wfh_next }}">
+      {% if wfh_next == "/control" %}
+        <label>Until <input type="time" name="until" value="{{ wfh.default_end or '' }}" required></label>
+        <button type="submit" class="primary">Start working from home</button>
+      {% elif wfh.default_end %}
+        <button type="submit" class="primary">Start working from home · until {{ wfh.default_end }}</button>
+      {% else %}
+        <span class="muted small">It is night — set an end time on <a href="/control#wfh">Control</a> to start.</span>
+      {% endif %}
+    </form>
+    <p class="muted small">Overrides the bedrooms' day schedule until the end time. Price spikes still pause the heaters. <a href="/settings#work-from-home">Settings</a></p>
+  {% endif %}
+</section>
+{% endif %}

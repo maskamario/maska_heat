@@ -139,6 +139,14 @@ class SpikeSettings(BaseModel):
     notify_before_min: int = 60
 
 
+class WorkFromHomeSettings(BaseModel):
+    """Working-from-home mode: someone works in a space without a heater of its own (the upstairs hall), warmed
+    through the open doors of the rooms next to it. Target and end time are set in the UI (control.WorkFromHome)."""
+
+    hall_zone: str = "hall"  # the space to keep warm: a zone with a room sensor
+    heat_zones: list[str] = []  # rooms whose heaters warm it while their door is open
+
+
 class NotifySettings(BaseModel):
     enabled: bool = True
     app_url: str | None = None  # how the phones reach the app, for buttons in notifications
@@ -165,6 +173,7 @@ class Settings(BaseModel):
     zones: dict[str, ZoneSettings] = {}
     hot_water: HotWaterSettings | None = None
     spike: SpikeSettings | None = None
+    work_from_home: WorkFromHomeSettings | None = None
     notify: NotifySettings = NotifySettings()
     web: WebSettings = WebSettings()
     database: str = "data/maska_heat.db"
@@ -201,9 +210,20 @@ class Settings(BaseModel):
             for z in self.spike.zones:
                 if z not in self.zones:
                     raise ValueError(f"spike: unknown zone {z!r}")
+        if self.work_from_home:
+            hall = self.zones.get(self.work_from_home.hall_zone)
+            if hall is None or hall.room_sensor is None:
+                raise ValueError(f"work_from_home: hall_zone {self.work_from_home.hall_zone!r} must be a zone with a room sensor")
+            for z in self.work_from_home.heat_zones:
+                if z not in self.zones or not self.zones[z].device:
+                    raise ValueError(f"work_from_home: heat zone {z!r} must be a zone with a heater")
         if self.outdoor_sensor and self.outdoor_sensor not in self.sensors:
             raise ValueError(f"outdoor_sensor: unknown sensor {self.outdoor_sensor!r}")
         return self
+
+    def door_of(self, zone: str) -> str | None:
+        """The door sensor source ("door:<name>") on a zone's door, if it has one."""
+        return next((f"door:{k}" for k, d in self.doors.items() if d.zone == zone and d.enabled), None)
 
     @property
     def database_path(self) -> Path:

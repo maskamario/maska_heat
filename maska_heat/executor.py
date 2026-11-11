@@ -4,6 +4,9 @@
   (Mill → its weekly program, others → the setpoint they had before the app took over).
 - Manual: the user's fixed setpoint from the UI.
 - Smart: the schedule target from schedule.smart_target (no price shifting yet).
+- Working from home (a temporary override of Smart in the rooms next to the hall): a thermostat on the hall
+  sensor. While the hall is below its target, each of those rooms with its door open is asked for the bedroom
+  maximum; once the hall is warm enough, for the hall target itself. Never below the room's schedule target.
 
 Rules: only setpoints are written, never power on/off; a setpoint is only sent when it differs from the
 device's current one; a sent value is not repeated while the device may still be syncing (Adax cloud ~5 min).
@@ -47,6 +50,8 @@ TRIM_MAX_STEP = 15 * 60  # longest gap counted between two updates
 TRIM_CYCLING = 0.5  # the heater is cycling (not idle or flat out) while its sensor is within this of its setpoint
 PENDING_SECONDS = 10 * 60  # don't re-send the same value within this time
 FRESH_READING_SECONDS = 15 * 60
+WFH_CALLING_KEY = "wfh_calling"  # kv: "1" while the hall asks for heat, "0" once it has reached its target
+WFH_HYSTERESIS = 0.3  # °C the hall may drop below its target before the bedrooms heat for it again
 
 
 @dataclass
@@ -62,6 +67,7 @@ class ZoneDecision:
     trim: float = 0.0  # room-sensor control: learned correction when the room settles off target, °C
     learn: bool = False  # the trim may learn from this cycle: a plain target on fresh data (no spike rule)
     safety: bool = False  # a spike pause overridden because the room is below the safety minimum
+    wfh: str | None = None  # working from home: what this room does for the hall
 
 
 def heater_offset(db: Database, device: str, sensor_source: str, now: float) -> float | None:
@@ -124,7 +130,8 @@ class Executor:
     # decision -----------------------------------------------------------------
     #
     # One pipeline per zone: (1) zones the app does not drive, (2) the room target — manual or the schedule,
-    # (3) price-spike rules on top of it, (4) for room-sensor control, one conversion to the heater's units.
+    # raised by working-from-home mode, (3) price-spike rules on top of it, (4) for room-sensor control, one
+    # conversion to the heater's units.
 
     def decide(self, zone_key: str, now: float | None = None, snap: Snapshot | None = None) -> ZoneDecision:
         now = now or time.time()
@@ -166,6 +173,7 @@ class Executor:
             preheating_for=self._preheating_for.get(zone_key),
         )
         d = ZoneDecision("smart", target.setpoint, target.reason, smart=target, blocked=blocked, learn=blocked is None)
+        self._work_from_home(zone_key, d, now)
 
         # (3) price spikes
         band = snap.comfort.band(target.mode)
@@ -184,10 +192,71 @@ class Executor:
         ahead = spike.preheating(self.settings, self.db, zone_key, now)
         if ahead and slot_at(zone_key, datetime.fromtimestamp(ahead.start, self.tz), snap).mode not in ("day", "night"):
             ahead = None  # nobody home during the spike (Away, Out): stored heat would buy nothing
-        if ahead and band.max > target.setpoint:
+        if ahead and band.max > d.setpoint:
             d.setpoint, d.learn = band.max, False
             d.label = f"pre-heating before the price spike at {datetime.fromtimestamp(ahead.start, self.tz):%H:%M}"
         return d
+
+    # working from home ---------------------------------------------------------
+
+    def hall_temp(self, now: float) -> float | None:
+        """The hall sensor's mean over the last 10 min (None while it is silent or the mode is not configured)."""
+        cfg = self.settings.work_from_home
+        return room_temp(self.db, self.settings.zones[cfg.hall_zone].room_sensor, now, ROOM_SENSOR_FRESH) if cfg else None
+
+    def door_open(self, zone_key: str, now: float) -> bool | None:
+        """Is the zone's door open? None when it has no door sensor or the sensor has not reported yet."""
+        source = self.settings.door_of(zone_key)
+        row = self.db.door_state_at(source, int(now)) if source else None
+        return None if row is None else bool(row["is_open"])
+
+    def _hall_calling(self, hall: float, target: float) -> bool:
+        """Thermostat with hysteresis: heat until the hall reaches its target, then wait until it has dropped
+        WFH_HYSTERESIS below it. The state is kept in kv (reset to heating when the mode is switched on)."""
+        was = self.db.get_kv(WFH_CALLING_KEY) != "0"
+        calling = hall < target if was else hall <= target - WFH_HYSTERESIS
+        if calling != was:
+            self.db.set_kv(WFH_CALLING_KEY, "1" if calling else "0")
+        return calling
+
+    def _work_from_home(self, zone_key: str, d: ZoneDecision, now: float) -> None:
+        """Raise a Smart room's target while someone works in the hall next to it (control.WorkFromHome).
+
+        - door closed: the heater cannot reach the hall — the room keeps its normal schedule;
+        - door open, or no door sensor data: hall below target → the bedroom maximum, otherwise the hall target
+          (so the room neither overheats nor draws the hall's heat away);
+        - hall sensor silent: the hall target, as if the hall were warm enough — never the maximum blindly.
+        Only ever raises the schedule's target. Price-spike rules apply afterwards, as for any Smart target.
+        """
+        cfg = self.settings.work_from_home
+        if not cfg or zone_key not in cfg.heat_zones:
+            return
+        wfh = self.store.work_from_home()
+        if not wfh.active_at(datetime.fromtimestamp(now, self.tz)):
+            return
+        if self.door_open(zone_key, now) is False:
+            d.wfh = "door closed — follows its normal schedule"
+            d.label = f"{d.label} · working from home: door closed, normal schedule"
+            return
+        hall = self.hall_temp(now)
+        if hall is None:
+            want, d.wfh = wfh.target, f"hall sensor silent — holds {wfh.target:.1f} °C"
+        elif self._hall_calling(hall, wfh.target):
+            want, d.wfh = wfh.max_bedroom, f"warming the hall ({hall:.1f} → {wfh.target:.1f} °C)"
+        else:
+            want, d.wfh = wfh.target, f"hall is warm enough ({hall:.1f} °C)"
+        if want > d.setpoint:
+            d.setpoint, d.learn = want, False  # a jumping target is nothing for the trim to learn from
+        d.label = f"Working from home — {d.wfh}"
+
+    def end_work_from_home(self, now: float | None = None) -> bool:
+        """Switch the mode off once its end time has passed (the rooms are back on their schedule already)."""
+        wfh = self.store.work_from_home()
+        if wfh.until is None or datetime.fromtimestamp(now or time.time(), self.tz) < wfh.until:
+            return False
+        self.store.set_work_from_home(wfh.model_copy(update={"until": None}))
+        self.db.add_event("info", "control", f"Working from home ended at {wfh.until:%H:%M} — bedrooms back on their schedule")
+        return True
 
     def room_estimate(self, zone_key: str, now: float) -> float | None:
         """The room temperature the decision works with.
@@ -428,6 +497,7 @@ class Executor:
         self.db.add_event("info", f"control:{zone_key}", f"{zone.name}: {msg}")
 
     async def run_all(self) -> None:
+        self.end_work_from_home()
         for zone_key in self.settings.zones:
             await self.apply_zone(zone_key)
 

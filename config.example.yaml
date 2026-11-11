@@ -137,6 +137,13 @@ spike:
   safety_min_temp: 18         # a paused room below this heats to its comfort min again
   notify_before_min: 60
 
+# Working from home: a button (dashboard, Control) heats the hall — which has no heater — with the bedroom heaters
+# through the open bedroom doors, instead of the bedrooms' day schedule. Hall target, bedroom maximum and end time
+# are edited on the Settings page. A room with its door closed keeps its schedule; price spikes still pause.
+work_from_home:
+  hall_zone: hall             # the space to keep warm: a zone with a room sensor
+  heat_zones: [madli, matis]  # rooms whose heaters warm it (door sensors above tell whether they can)
+
 notify:
   enabled: true
   app_url: http://maska-heat:8000   # how the phones reach the app (Tailscale name), for notification buttons

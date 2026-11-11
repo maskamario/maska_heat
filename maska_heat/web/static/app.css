@@ -279,6 +279,12 @@ input[type="checkbox"] { width: 22px; height: 22px; }
 .plan dt { color: var(--muted); }
 .plan dd { margin: 0; font-variant-numeric: tabular-nums; }
 
+/* working from home */
+.wfh.is-on { border-left: 4px solid var(--ember); }
+.wfh .plan { margin: 0 0 12px; }
+.wfh .plan > div { display: contents; }
+.wfh form { margin: 0; }
+
 /* phones ------------------------------------------------------------------------------------------ */
 
 @media (max-width: 600px) {

@@ -423,6 +423,26 @@ it (Mill: back to weekly program). The Mill is also released to its weekly progr
 Away from/until (house), Home today (kid), Boost (zone, N h), Hold (until cancelled), Flex off today, fire logged.
 Precedence: Hold > Boost > Away > Home-today > Flex > Plan > Schedule fallback. All expire and are visible.
 
+### 5.7 Working from home (built)
+Someone works in the upstairs hall, which has no heater: it is warmed by the two bedroom heaters through the open
+bedroom doors (§1.1). A button on the dashboard and the Control page switches the mode on until an end time (default
+17:00; after that the button offers the night start); it ends by itself, or earlier from the same button. Hall
+target (21.5 °C), bedroom maximum (24 °C) and end time are edited on the Settings page (kv `work_from_home`);
+which zones take part is in config (`work_from_home: hall_zone, heat_zones`).
+
+While it is on, the executor replaces the schedule target of each `heat_zones` room **in Smart mode** with a
+thermostat on the hall sensor (10-min mean):
+- hall below target → the room is asked for the **bedroom maximum** (the heater runs flat out with the door open);
+  once the hall reaches the target → the room is held at the **hall target**, until the hall has dropped 0.3 °C
+  below it again (hysteresis, state in kv `wfh_calling`). Never below the room's own schedule target.
+- **Door closed** (door sensor): that heater cannot reach the hall, so the room keeps its normal schedule and is not
+  heated to the maximum for nothing. No door data → treated as open (the bedroom maximum still bounds it).
+- **Hall sensor silent** (no reading for 10 min): rooms hold the hall target — never the maximum blindly.
+- Manual and Hands-off rooms are left alone; the panel says so.
+- **Price spikes apply on top, unchanged** (§10.1): the rooms pause, the 18 °C safety minimum and "Keep heating"
+  work as on any day. The room-sensor trim (§11) does not learn while the mode moves the target.
+Start, end and automatic end are logged as events; the hall's dashboard card shows the target while the mode is on.
+
 ---
 
 ## 6. Logging & data

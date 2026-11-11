@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if error %}<p class="notice bad-bg">{{ error }}</p>{% endif %}
 <div id="status" class="status" hx-get="/partials/status" hx-trigger="every 60s" hx-swap="innerHTML">
   {% include "_status.html" %}
 </div>

@@ -39,6 +39,19 @@
   </form>
 </section>
 
+{% if wfh %}
+<section class="card" id="work-from-home">
+  <header class="card-head"><h2>Working from home</h2><span class="muted">Switched on from the dashboard or Control · the bedrooms heat the {{ hall_name | lower }} through their open doors</span></header>
+  <form method="post" action="/settings/work-from-home" class="form-row">
+    <label>{{ hall_name }} target, °C <input type="number" name="target" value="{{ wfh.target }}" step="0.5" min="5" max="30" required></label>
+    <label>Bedrooms at most, °C <input type="number" name="max_bedroom" value="{{ wfh.max_bedroom }}" step="0.5" min="5" max="30" required></label>
+    <label>Ends at <input type="time" name="end_time" value="{{ wfh.end_time | hhmm }}" required></label>
+    <button type="submit">Save working from home</button>
+  </form>
+  <p class="muted small">While the {{ hall_name | lower }} is below its target, a bedroom with its door open is heated up to the bedroom maximum; once the target is reached it is held at the target. A bedroom with its door closed keeps its normal schedule. Price spikes still pause the heaters.</p>
+</section>
+{% endif %}
+
 <section class="card" id="school">
   <header class="card-head"><h2>School timetable</h2><span class="muted">Rooms are "Out" between leaving and returning, and warm again by the return time</span></header>
   <form method="post" action="/settings/school">

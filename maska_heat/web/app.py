@@ -19,11 +19,14 @@ from fastapi.templating import Jinja2Templates
 
 from .. import __version__
 from ..collector import Collector
-from ..control import COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, ControlStore, DateRange, HouseSchedule, KidSchool, SchoolDay
+from ..control import (
+    COMFORT_MODES, SETPOINT_RANGE, Away, Band, Comfort, ControlStore, DateRange, HouseSchedule, KidSchool, SchoolDay,
+    WorkFromHome,
+)
 from ..dashboard import HISTORY_MAX_HOURS, as_dict, history, upcoming_prices, verdict, zone_view, zone_views
 from ..db import Database
 from ..energy import METHOD_LABEL, PERIODS, as_json as energy_json, summarize as energy_summary
-from ..executor import Executor, describe_mode, zone_modes
+from ..executor import WFH_CALLING_KEY, Executor, describe_mode, zone_modes
 from .. import spike as spikes
 from ..hotwater import HotWaterController, describe as describe_windows, planned as hot_water_plan
 from ..notify import Notifier
@@ -157,12 +160,19 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         decided = decisions(request)
         spike = spike_context(request, now)
         paused = set(spike["keys"]) if spike and spike["active"] and not spike["overridden"] else set()
+        wfh = wfh_context(request, now, decided)
+        hall_target = {settings.work_from_home.hall_zone: wfh["target"]} if wfh and wfh["active"] else {}
         return {
             "request": request,
             "spike": spike,
+            "wfh": wfh,
+            "wfh_next": "/",
             "energy_today": energy_summary(settings, db, "today", now),
             "zones": views,
-            "cards": {v.key: card_state(v, decided[v.key], spike["end"] if v.key in paused else None) for v in views},
+            "cards": {
+                v.key: card_state(v, decided[v.key], spike["end"] if v.key in paused else None, hall_target.get(v.key))
+                for v in views
+            },
             "price_now": next((p for p in prices if p.is_now), None),
             "prices": prices,
             "outdoor": outdoor,
@@ -173,10 +183,13 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "away": _store(request).away(),
         }
 
-    def card_state(view, d, paused_until: str | None) -> dict:
-        """What a dashboard card shows besides the raw values: the target, a one-line verdict, the state edge."""
+    def card_state(view, d, paused_until: str | None, hall_target: float | None = None) -> dict:
+        """What a dashboard card shows besides the raw values: the target, a one-line verdict, the state edge.
+        `hall_target`: the working-from-home target of the hall, which has no heater (and so no target) of its own."""
         zone = settings.zones[view.key]
-        if d.room_target is not None:
+        if hall_target is not None:
+            target = hall_target
+        elif d.room_target is not None:
             target = d.room_target
         elif zone.control_by == "room":
             target = None  # the heater's own setpoint is not a room temperature
@@ -220,6 +233,51 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "zones": ", ".join(settings.zones[z].name for z in keys),
         }
 
+    def wfh_default_end(now_local: datetime, wfh: WorkFromHome, store: ControlStore) -> datetime | None:
+        """When the mode ends if switched on now: the end of the workday, after that the start of the night."""
+        for t in (wfh.end_time, store.house().night_start):
+            end = datetime.combine(now_local.date(), t, tz)
+            if now_local < end:
+                return end
+        return None
+
+    def wfh_context(request: Request, now: float, decided: dict | None = None) -> dict | None:
+        """The working-from-home panel: state, hall temperature and what each bedroom does for the hall."""
+        cfg = settings.work_from_home
+        if not cfg:
+            return None
+        ex, store = _executor(request), _store(request)
+        wfh = store.work_from_home()
+        now_local = datetime.fromtimestamp(now, tz)
+        active = wfh.active_at(now_local)
+        rooms = []
+        for k in cfg.heat_zones:
+            d = decided[k] if decided else ex.decide(k)
+            door = ex.door_open(k, now)
+            if d.mode != "smart":
+                note, helps = f"in {describe_mode(d.mode)} — this mode only drives Smart rooms", False
+            elif door is False:
+                note, helps = "follows its normal schedule", False
+            elif active and spikes.pausing(settings, _db(request), k, now):
+                note, helps = "paused for the price spike", False
+            elif d.blocked:
+                note, helps = f"not sending: {d.blocked}", False
+            else:
+                note, helps = d.wfh, True
+            rooms.append({"name": settings.zones[k].name, "door": door, "note": note, "helps": helps})
+        default_end = wfh_default_end(now_local, wfh, store)
+        return {
+            "active": active,
+            "target": wfh.target,
+            "max_bedroom": wfh.max_bedroom,
+            "until": wfh.until,
+            "hall": ex.hall_temp(now),
+            "hall_name": settings.zones[cfg.hall_zone].name,
+            "rooms": rooms,
+            "idle": active and not any(r["helps"] for r in rooms),  # on, but no heater is working for the hall
+            "default_end": default_end.strftime("%H:%M") if default_end else None,
+        }
+
     def fires_context(request: Request) -> dict:
         return {
             "request": request,
@@ -228,8 +286,9 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         }
 
     @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request):
+    def dashboard(request: Request, error: str | None = None):
         ctx = status_context(request) | fires_context(request)
+        ctx["error"] = error
         ctx["events"] = _db(request).events(15)
         known = spikes.spikes_around(settings, _db(request), time.time()) if settings.spike else []
         ctx["prices_json"] = [
@@ -310,6 +369,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "request": request,
             "cards": [zone_card_context(request, k) for k in settings.zones],
             "away": store.away(),
+            "wfh": wfh_context(request, time.time()),
+            "wfh_next": "/control",
             "kids": [k for k, kid in school.zones.items() if kid.enabled and k in settings.zones],
             "home_today": {k for k, d in store.home_today().items() if d == today},
             "zones": settings.zones,
@@ -397,6 +458,40 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         _apply(request)
         return RedirectResponse("/control", status_code=303)
 
+    def _wfh_back(next: str, error: str | None = None) -> RedirectResponse:
+        page = "/control" if next == "/control" else "/"
+        return RedirectResponse(f"{page}?{urlencode({'error': error})}" if error else page, status_code=303)
+
+    @app.post("/work-from-home")
+    async def work_from_home_start(request: Request, until: str = Form(""), next: str = Form("/control")):
+        if not settings.work_from_home:
+            raise HTTPException(404, "working from home is not configured")
+        store = _store(request)
+        wfh = store.work_from_home()
+        now_local = datetime.now(tz)
+        try:
+            end = datetime.combine(now_local.date(), datetime.strptime(until, "%H:%M").time(), tz) if until else None
+        except ValueError:
+            return _wfh_back(next, "Invalid end time")
+        end = end or wfh_default_end(now_local, wfh, store)
+        if end is None or end <= now_local:
+            return _wfh_back(next, "Working from home must end later today — pick an end time")
+        store.set_work_from_home(wfh.model_copy(update={"until": end}))
+        _db(request).set_kv(WFH_CALLING_KEY, "1")  # a fresh start: heat until the hall reaches its target
+        _db(request).add_event("info", "control", f"Working from home until {end:%H:%M} — hall target {wfh.target:.1f} °C")
+        _apply(request)
+        return _wfh_back(next)
+
+    @app.post("/work-from-home/stop")
+    async def work_from_home_stop(request: Request, next: str = Form("/control")):
+        store = _store(request)
+        wfh = store.work_from_home()
+        if wfh.until is not None:
+            store.set_work_from_home(wfh.model_copy(update={"until": None}))
+            _db(request).add_event("info", "control", "Working from home ended — bedrooms back on their schedule")
+            _apply(request)
+        return _wfh_back(next)
+
     @app.post("/home-today/{zone_key}")
     async def home_today(request: Request, zone_key: str, on: int = Form(...)):
         _zone_or_404(zone_key)
@@ -420,6 +515,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
                 "school": store.school(),
                 "zones": settings.zones,
                 "weekdays": WEEKDAYS,
+                "wfh": store.work_from_home() if settings.work_from_home else None,
+                "hall_name": settings.zones[settings.work_from_home.hall_zone].name if settings.work_from_home else None,
                 "saved": saved,
                 "error": error,
                 "notify_available": request.app.state.notifier.available,
@@ -449,6 +546,23 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
         _db(request).add_event("info", "settings", "Comfort ranges updated")
         _apply(request)
         return _back(saved="comfort")
+
+    @app.post("/settings/work-from-home")
+    async def save_work_from_home(
+        request: Request, target: float = Form(...), max_bedroom: float = Form(...), end_time: str = Form(...)
+    ):
+        store = _store(request)
+        try:
+            wfh = WorkFromHome(target=target, max_bedroom=max_bedroom, end_time=end_time, until=store.work_from_home().until)
+        except ValidationError as e:
+            return _back(error=f"Working from home not saved: {_err(e)}")
+        store.set_work_from_home(wfh)
+        _db(request).add_event(
+            "info", "settings",
+            f"Working from home: hall {wfh.target:.1f} °C, bedrooms up to {wfh.max_bedroom:.1f} °C, ends {wfh.end_time:%H:%M}",
+        )
+        _apply(request)
+        return _back(saved="wfh")
 
     @app.post("/settings/house")
     async def save_house(
