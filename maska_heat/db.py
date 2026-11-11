@@ -213,6 +213,10 @@ class Database:
             (source, since, until or 2**62),
         )
 
+    def mark_not_heating(self, source: str, timestamps: list[int]) -> None:
+        """Correct readings wrongly logged as heating (maska_heat/repair.py)."""
+        self._many("UPDATE readings SET is_heating=0, power_w=0 WHERE source=? AND ts=?", [(source, ts) for ts in timestamps])
+
     # prices -------------------------------------------------------------------
 
     def upsert_prices(self, points: list[tuple[int, int, float]]) -> None:
@@ -307,6 +311,9 @@ class Database:
 
     def events(self, limit: int = 20) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM events ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
+
+    def events_of(self, source: str, since: int) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM events WHERE source=? AND ts>=? ORDER BY ts, id", (source, since))
 
     def add_notification(self, kind: str, title: str, message: str, ok: bool) -> None:
         self._exec(
