@@ -75,6 +75,47 @@ def test_parse_water_heater():
     assert (heating.is_heating, heating.power_w, heating.mode) == (True, 2210.0, "Automatic, heats off-peak, away")
 
 
+def test_heat_request_outside_the_schedule_is_not_heating():
+    from datetime import datetime
+
+    # Wednesday 11.11.2026 (capability 247): slots 02:00–07:00 and 18:00–19:00, tank asks for heat, power estimate 0
+    caps = CAPS | {281: "1", 230: "1", 247: "[[120,420],[1080,1140],[0,0]]"}
+    at = lambda h, m=0: datetime(2026, 11, 11, h, m, tzinfo=TZ)  # noqa: E731
+    assert parse_water_heater(caps, at(13)).is_heating is False  # waits for 18:00
+    assert parse_water_heater(caps, at(17, 59)).is_heating is False
+    assert parse_water_heater(caps, at(18)).is_heating is True
+    assert parse_water_heater(caps, at(19)).is_heating is False
+    assert parse_water_heater(caps, at(13)).power_w is None  # the collector then logs 0 W, not rated power
+    assert parse_water_heater(caps | {165: "1"}, at(13)).is_heating is True  # boost heats outside the slots
+    assert parse_water_heater(caps | {230: "0"}, at(13)).is_heating is True  # "heats any time"
+    assert parse_water_heater({k: v for k, v in caps.items() if k != 247}, at(13)).is_heating is True  # no slots reported
+    assert parse_water_heater(caps).is_heating is True  # no clock given: as before
+
+
+async def test_collector_logs_no_power_while_the_schedule_holds_the_boiler(settings, db, monkeypatch):
+    from datetime import datetime
+
+    import maska_heat.adapters.cozytouch as cozytouch
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 11, 13, 0, tzinfo=tz)
+
+    monkeypatch.setattr(cozytouch, "datetime", Clock)
+    s = with_boiler(settings)
+    c = Collector(s, SECRETS, db, Notifier(s.notify, None, db, TZ))
+    cloud = FakeCloud()
+    cloud.caps |= {281: "1", 230: "1", 247: "[[120,420],[1080,1140],[0,0]]"}
+    adapter = cloud.adapter()
+    adapter.tz = c.tz
+    c.devices["water_heater"] = adapter
+    await c.poll_device("water_heater")
+    row = db.latest_reading("device:water_heater")
+    assert (row["is_heating"], row["power_w"]) == (0, 0.0)
+    await c.stop()
+
+
 async def test_read_logs_in_once_and_picks_the_water_heater():
     cloud = FakeCloud()
     cz = cloud.adapter()

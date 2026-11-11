@@ -13,6 +13,7 @@ Capability ids used (names from GET /magellan/productmodels/capabilities):
 from __future__ import annotations
 
 import time
+from datetime import datetime, tzinfo
 from typing import Any
 
 import httpx
@@ -72,7 +73,21 @@ def _int(caps: dict[int, str], cap: int) -> int | None:
     return None if v is None else int(v)
 
 
-def parse_water_heater(caps: dict[int, str]) -> DeviceState:
+def may_heat(caps: dict[int, str], local: datetime) -> bool:
+    """Whether the boiler is allowed to heat right now. On "heats on schedule" it heats only inside the day's
+    time slots or during a boost; outside them a heat request just waits for the next slot."""
+    if _int(caps, CAP_RANGE) != RANGE_SCHEDULE or caps.get(CAP_BOOST) == "1":
+        return True
+    slots = caps.get(CAP_SCHEDULE[local.weekday()])
+    if slots is None:  # not reported: don't guess
+        return True
+    minute = local.hour * 60 + local.minute
+    return any(a <= minute < b for a, b in parse_schedule(slots))
+
+
+def parse_water_heater(caps: dict[int, str], local: datetime | None = None) -> DeviceState:
+    """`local` is the house's time now: with it, a heat request the schedule is holding back is not "heating"
+    (the collector would count rated power for every hour the tank waits for its next slot)."""
     setpoint_mode, op_range, service = _int(caps, CAP_SETPOINT_MODE), _int(caps, CAP_RANGE), _int(caps, CAP_SERVICE)
     mode = ", ".join(
         m
@@ -84,6 +99,8 @@ def parse_water_heater(caps: dict[int, str]) -> DeviceState:
         if m
     )
     heat_req = _int(caps, CAP_HEAT_REQ)
+    if heat_req == 1 and local is not None and not may_heat(caps, local):
+        heat_req = 0
     power = _num(caps, CAP_POWER)
     return DeviceState(
         room_temp=_num(caps, CAP_WATER_TEMP),
@@ -109,10 +126,11 @@ class CozytouchWaterHeaterAdapter:
         writable=False,
     )
 
-    def __init__(self, email: str, password: str, device_name: str | None = None, client: httpx.AsyncClient | None = None):
+    def __init__(self, email: str, password: str, device_name: str | None = None, client: httpx.AsyncClient | None = None, tz: tzinfo | None = None):
         self._email = email
         self._password = password
         self.device_name = device_name
+        self.tz = tz
         self._client = client or httpx.AsyncClient(base_url=API_URL, timeout=TIMEOUT_SECONDS)
         self._token: str | None = None
         self._token_until = 0.0
@@ -168,7 +186,7 @@ class CozytouchWaterHeaterAdapter:
         devices = [d for s in (setups if isinstance(setups, list) else [setups]) for d in s.get("devices") or []]
         dev = self._pick(devices)  # setup name and address are never stored or logged
         caps = {int(c["capabilityId"]): c.get("value") for c in dev.get("capabilities") or []}
-        state = parse_water_heater(caps)
+        state = parse_water_heater(caps, datetime.now(self.tz) if self.tz else None)
         state.online = bool(dev.get("isAvailable", True))
         state.raw["name"] = dev.get("name")
         self.device_id = dev.get("deviceId")

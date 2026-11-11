@@ -35,7 +35,7 @@ ENERGY_HOURLY_DAYS = 13  # MELCloud keeps hourly data for about two weeks
 NEXT_DAY_PRICES_AFTER = (13, 30)  # local time; day-ahead results are published ~14:00
 
 
-def build_adapter(name: str, cfg: DeviceSettings, secrets: dict[str, Any]) -> DeviceAdapter:
+def build_adapter(name: str, cfg: DeviceSettings, secrets: dict[str, Any], tz: ZoneInfo | None = None) -> DeviceAdapter:
     """Create the adapter for a configured device. Raises ValueError when configuration is incomplete."""
     if cfg.type == "mill_local":
         from .adapters.mill_local import MillLocalAdapter
@@ -72,7 +72,7 @@ def build_adapter(name: str, cfg: DeviceSettings, secrets: dict[str, Any]) -> De
         cz = secrets.get("cozytouch") or {}
         if not cz.get("email") or not cz.get("password"):
             raise ValueError(f"device {name}: cozytouch email/password missing in secrets.yaml")
-        return CozytouchWaterHeaterAdapter(cz["email"], cz["password"], device_name=cfg.device_name)
+        return CozytouchWaterHeaterAdapter(cz["email"], cz["password"], device_name=cfg.device_name, tz=tz)
     raise ValueError(f"device {name}: unknown type {cfg.type}")
 
 
@@ -103,7 +103,7 @@ class Collector:
             if not cfg.enabled:
                 continue
             try:
-                self.devices[name] = build_adapter(name, cfg, secrets)
+                self.devices[name] = build_adapter(name, cfg, secrets, self.tz)
                 self.health[f"device:{name}"] = SourceHealth(name, now)
             except ValueError as e:
                 log.warning("%s", e)
