@@ -302,7 +302,13 @@ id, polled at `/magellan/executions/<id>` until state 3). Every 10 min, when the
    (top-up for the evening wash); merged into ≤ 3 windows (the boiler's limit), filling the cheapest gaps.
 3. Operating range → Heat_Schedule. The boiler then follows the schedule on its own — if the app, the Pi or the
    cloud is down it keeps the last schedule, so hot water never depends on the app.
-4. Safety net: hot water < 30 % outside the windows → one boost (capability 165) and an ntfy message, at most every 3 h.
+4. Target temperature held constant: setpoint mode (87) → Constant and the setpoint (22) → `water_temp` (70 °C;
+   `null` leaves the boiler's own). In **Automatic** the boiler picks its own target: on 15.11.2026 it lowered it
+   from 70 to 46 °C, the water stayed above that in every cheap window, nothing heated for two days and the
+   safety boost fired at the evening peak price. Hands-off puts the mode back (a target the boiler chose itself
+   is not written back). A refused write is reported once and does not stop the schedule or the boost.
+5. Safety net: hot water < 30 % outside the windows → one boost (capability 165) and an ntfy message, at most every
+   3 h — but not when a window starts within `boost_wait_min` (60): it waits for the cheap hours.
 
 On the prices of 28.10–9.11 the planned hours averaged ~30 % below the day's average price ("heats any time") and
 ~15 % below the saved night schedule. Settings in `config.yaml → hot_water`; narrow `hours_per_day` once the log

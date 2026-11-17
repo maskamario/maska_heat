@@ -33,8 +33,9 @@ SETPOINT_MODES = {0: "Constant", 2: "Eco/comfort schedule", 3: "Automatic", 4: "
 OPERATING_RANGES = {0: "heats any time", 1: "heats on schedule", 2: "heats off-peak", 3: "self-consumption"}
 SERVICE_ON = {2, 3}  # On, OnReduced (0 Off, 1 OffAntifrost)
 
-# Writable: when it may heat, the weekly time slots, boost
+# Writable: when it may heat, the weekly time slots, boost, how the target temperature is chosen
 RANGE_ANY_TIME, RANGE_SCHEDULE = 0, 1
+SETPOINT_CONSTANT = 0  # the other modes let the boiler pick its own target (see SETPOINT_MODES)
 CAP_BOOST = 165
 CAP_SCHEDULE = {0: 245, 1: 246, 2: 247, 3: 248, 4: 249, 5: 250, 6: 251}  # Monday … Sunday
 MAX_WINDOWS = 3

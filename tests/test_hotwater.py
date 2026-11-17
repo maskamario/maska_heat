@@ -7,9 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from maska_heat.adapters.base import DeviceState
-from maska_heat.adapters.cozytouch import CAP_BOOST, CAP_RANGE, CAP_SCHEDULE, parse_schedule, schedule_value
+from maska_heat.adapters.cozytouch import (
+    CAP_BOOST,
+    CAP_RANGE,
+    CAP_SCHEDULE,
+    CAP_SETPOINT,
+    CAP_SETPOINT_MODE,
+    parse_schedule,
+    schedule_value,
+)
 from maska_heat.control import ControlStore, ZoneControl
-from maska_heat.hotwater import HotWaterController, HotWaterRules, day_prices, in_window, plan_day
+from maska_heat.hotwater import HotWaterController, HotWaterRules, day_prices, in_window, plan_day, planned, starts_within
 from maska_heat.notify import Notifier
 from maska_heat.settings import Settings
 from maska_heat.web.app import create_app
@@ -234,3 +242,79 @@ async def test_handback_writes_only_what_differs_and_resumes(rig):
     await hw.run(NOW.timestamp() + 1200)  # continues with Wednesday, skips the untouched days
     assert [c for c, _ in boiler.writes] == [CAP_SCHEDULE[1], CAP_SCHEDULE[2], CAP_RANGE]
     assert not hw.state()["engaged"] and boiler.caps[CAP_SCHEDULE[2]] == "[[0,360],[1320,1440],[0,0]]"
+
+
+def test_starts_within():
+    def at(h, m):
+        return datetime(2026, 11, 17, h, m, tzinfo=TZ)
+
+    today, tomorrow = [(0, 60), (1080, 1260)], [(0, 300)]
+    assert starts_within(today, tomorrow, at(17, 35), 60)  # the 18:00 window is 25 min away
+    assert not starts_within(today, tomorrow, at(16, 30), 60)
+    assert not starts_within(today, tomorrow, at(18, 0), 60)  # already inside: not "about to start"
+    assert starts_within(today, tomorrow, at(23, 30), 60)  # tomorrow's 00:00 window
+    assert not starts_within(None, None, at(17, 35), 60)
+
+
+async def test_no_boost_just_before_a_window(rig):
+    """17.11.2026: the boost fired at 17:35, at the evening peak price, 25 minutes before the 18:00 window."""
+    hw, store, boiler, db, sent = rig
+    store.set_zone("hot_water", ZoneControl(mode="smart"))
+    boiler.level = 25
+    start = max(a for a, _ in planned(hw.settings, db, NOW.date()))  # today's last window (the evening top-up)
+    midnight = datetime(2026, 11, 10, tzinfo=TZ)
+    await hw.run((midnight + timedelta(minutes=start - 30)).timestamp())
+    assert boiler.caps[CAP_BOOST] == "0" and sent == []
+    await hw.run((midnight + timedelta(minutes=start - 90)).timestamp())  # 90 min away: too long to wait
+    assert boiler.caps[CAP_BOOST] == "1" and len(sent) == 1
+
+
+async def test_smart_holds_the_target_and_handsoff_gives_it_back(rig):
+    """The boiler's "Automatic" mode lowered its own target to 46 °C and stopped heating in the cheap windows."""
+    hw, store, boiler, db, _ = rig
+    boiler.caps |= {CAP_SETPOINT_MODE: "3", CAP_SETPOINT: "46"}
+    store.set_zone("hot_water", ZoneControl(mode="smart"))
+    await hw.run(NOW.timestamp())
+    assert boiler.caps[CAP_SETPOINT_MODE] == "0" and boiler.caps[CAP_SETPOINT] == "70"
+    boiler.writes.clear()
+    await hw.run(NOW.timestamp() + 600)
+    assert boiler.writes == []
+
+    store.set_zone("hot_water", ZoneControl(mode="handsoff"))
+    await hw.run(NOW.timestamp() + 1200)
+    assert boiler.caps[CAP_SETPOINT_MODE] == "3"
+    assert (CAP_SETPOINT, "46") not in boiler.writes  # its own choice is not written back
+    assert not hw.state()["engaged"]
+
+
+async def test_target_is_held_on_a_boiler_taken_over_earlier(rig):
+    hw, store, boiler, db, _ = rig
+    store.set_zone("hot_water", ZoneControl(mode="smart"))
+    await hw.run(NOW.timestamp())  # engaged while the boiler reported no setpoint mode
+    state = hw.state()
+    del state["restore_setpoint_mode"], state["restore_setpoint"]  # as saved by the version before
+    db.set_kv("hotwater", json.dumps(state))
+    boiler.caps |= {CAP_SETPOINT_MODE: "3", CAP_SETPOINT: "46"}
+    await hw.run(NOW.timestamp() + 600)
+    assert boiler.caps[CAP_SETPOINT_MODE] == "0" and boiler.caps[CAP_SETPOINT] == "70"
+    assert hw.state()["restore_setpoint_mode"] == "3"
+
+
+async def test_refused_target_write_keeps_the_boost_working(rig):
+    hw, store, boiler, db, sent = rig
+    boiler.caps |= {CAP_SETPOINT_MODE: "3", CAP_SETPOINT: "46"}
+    store.set_zone("hot_water", ZoneControl(mode="smart"))
+    real = boiler.write
+
+    async def refuse(cap, value):
+        if cap == CAP_SETPOINT_MODE:
+            raise RuntimeError("HTTP 400")
+        await real(cap, value)
+
+    boiler.write = refuse
+    boiler.level = 25
+    await hw.run(NOW.timestamp())
+    await hw.run(NOW.timestamp() + 600)
+    assert boiler.caps[CAP_BOOST] == "1" and len(sent) == 1
+    warnings = [e for e in db.events(50) if "could not fix the target" in str(tuple(e))]
+    assert len(warnings) == 1  # reported once, not every 10 minutes

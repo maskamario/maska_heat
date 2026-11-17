@@ -124,6 +124,8 @@ class HotWaterSettings(BaseModel):
     evening_by: time = time(19, 0)
     evening_hours: int = 1
     boost_below_pct: float = 30.0  # outside the windows, boost once when hot water drops below this
+    boost_wait_min: int = 60  # … unless a window starts within this many minutes: it waits for the cheap hours
+    water_temp: int | None = 70  # fixed target while Smart (the boiler's own "Automatic" lowers it); null: leave it
 
 
 class SpikeSettings(BaseModel):
@@ -206,6 +208,8 @@ class Settings(BaseModel):
                 raise ValueError(f"hot_water: zone {self.hot_water.zone!r} must be a zone with a cozytouch water heater")
             if not 1 <= self.hot_water.hours_per_day <= 24:
                 raise ValueError("hot_water: hours_per_day must be 1–24")
+            if self.hot_water.water_temp is not None and not 50 <= self.hot_water.water_temp <= 70:
+                raise ValueError("hot_water: water_temp must be 50–70 °C (or null to leave the boiler's own)")
         if self.spike:
             for z in self.spike.zones:
                 if z not in self.zones:

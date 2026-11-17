@@ -2,7 +2,8 @@
 planner is in hotwater_plan.py).
 
 The boiler's own weekly time-slot schedule (up to 3 windows a day) is rewritten every day from the electricity
-prices, and its operating range set to "heat on schedule". If the app, the Pi or the cloud is down, the boiler keeps
+prices, its operating range set to "heat on schedule" and its target temperature held constant (in its own
+"Automatic" mode the boiler lowers the target after a quiet week and then skips the cheap windows). If the app, the Pi or the cloud is down, the boiler keeps
 following the last schedule it got — hot water never depends on the app being up.
 
 Per day: `hours_per_day` hours in the cheapest hours, of which at least `morning_hours` before `morning_by` (tank full
@@ -22,7 +23,10 @@ from .adapters.cozytouch import (
     CAP_BOOST,
     CAP_RANGE,
     CAP_SCHEDULE,
+    CAP_SETPOINT,
+    CAP_SETPOINT_MODE,
     RANGE_SCHEDULE,
+    SETPOINT_CONSTANT,
     CozytouchWaterHeaterAdapter,
     parse_schedule,
 )
@@ -64,6 +68,20 @@ def planned(settings, db, day: date) -> list[tuple[int, int]] | None:
         skip = spike_hours(settings, db, day)
         return plan_day(prices, rules_from(settings.hot_water), avoid=skip)  # never heat in a price spike
     return plan_day(prices, rules_from(settings.hot_water))
+
+
+def _float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def starts_within(today: list | None, tomorrow: list | None, local: datetime, minutes: int) -> bool:
+    """Whether a heating window starts in the next `minutes` (tomorrow's first one counts just before midnight)."""
+    m = local.hour * 60 + local.minute
+    starts = [a for a, _ in today or []] + [a + 1440 for a, _ in tomorrow or []]
+    return any(0 < a - m <= minutes for a in starts)
 
 
 class HotWaterController:
@@ -130,12 +148,19 @@ class HotWaterController:
             self._save(state)
             self._event("maska-heat took control — heats in the cheapest hours")
 
+        if "restore_setpoint_mode" not in state:  # also for a boiler taken over before the target was held
+            state["restore_setpoint_mode"] = caps.get(CAP_SETPOINT_MODE)
+            state["restore_setpoint"] = caps.get(CAP_SETPOINT)
+            self._save(state)
+
         local = datetime.fromtimestamp(now, self.tz)
-        today_windows = None
+        today_windows = tomorrow_windows = None
         for day in (local.date(), local.date() + timedelta(days=1)):
             windows = planned(self.settings, self.db, day)
             if day == local.date():
                 today_windows = windows
+            else:
+                tomorrow_windows = windows
             if windows is None:
                 continue
             cap = CAP_SCHEDULE[day.weekday()]
@@ -145,6 +170,7 @@ class HotWaterController:
         if caps.get(CAP_RANGE) is not None and str(caps.get(CAP_RANGE)) != str(RANGE_SCHEDULE):  # None: not reported
             await adapter.set_operating_range(RANGE_SCHEDULE)
             self._event("set to heat on schedule")
+        await self._hold_target(adapter, caps, state)
 
         level = current.level_pct
         from .spike import pausing
@@ -154,6 +180,7 @@ class HotWaterController:
             and level is not None
             and level < self.cfg.boost_below_pct
             and not (today_windows and in_window(today_windows, local))
+            and not starts_within(today_windows, tomorrow_windows, local, self.cfg.boost_wait_min)
             and now - state.get("last_boost", 0) > BOOST_COOLDOWN
             and caps.get(CAP_BOOST) != "1"
         ):
@@ -163,6 +190,28 @@ class HotWaterController:
             msg = f"hot water at {level:.0f} % outside the cheap hours — boost started"
             self._event(msg)
             await self.notifier.send("hotwater", "Hot water boost", msg, tags="droplet")
+
+    async def _hold_target(self, adapter, caps: dict, state: dict) -> None:
+        """Constant target temperature while Smart. A refused write must not stop the schedule or the boost: it is
+        reported once and tried again on the next run."""
+        want = self.cfg.water_temp
+        if want is None or caps.get(CAP_SETPOINT_MODE) is None:  # not configured / not reported
+            return
+        try:
+            if str(caps.get(CAP_SETPOINT_MODE)) != str(SETPOINT_CONSTANT):
+                await adapter.write(CAP_SETPOINT_MODE, str(SETPOINT_CONSTANT))
+                self._event(f"target temperature fixed (was the boiler's own choice, {caps.get(CAP_SETPOINT)} °C)")
+            if _float(caps.get(CAP_SETPOINT)) != float(want):
+                await adapter.write(CAP_SETPOINT, str(want))
+                self._event(f"target temperature set to {want} °C")
+            error = None
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"
+            if state.get("target_error") != error:
+                self._event(f"could not fix the target temperature — {error}", "warning")
+        if state.get("target_error") != error:
+            state["target_error"] = error
+            self._save(state)
 
     async def _release(self, adapter, state: dict) -> None:
         """Put the boiler's own schedule and mode back: only what differs, the saved values as they were (not
@@ -179,6 +228,13 @@ class HotWaterController:
         rng = state.get("restore_range")
         if rng is not None and str(caps.get(CAP_RANGE)) != str(rng):
             await adapter.set_operating_range(int(rng))
+        mode, temp = state.get("restore_setpoint_mode"), state.get("restore_setpoint")
+        if mode is not None and caps.get(CAP_SETPOINT_MODE) is not None:
+            # A target the boiler chose itself is not written back: it picks its own again in that mode.
+            if str(mode) == str(SETPOINT_CONSTANT) and temp is not None and _float(caps.get(CAP_SETPOINT)) != _float(temp):
+                await adapter.write(CAP_SETPOINT, str(temp))
+            if str(caps.get(CAP_SETPOINT_MODE)) != str(mode):
+                await adapter.write(CAP_SETPOINT_MODE, str(mode))
         self._save({"engaged": False})
         self._event("handed back — the boiler's own mode and schedule restored")
 

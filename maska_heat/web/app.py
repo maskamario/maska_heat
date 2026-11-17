@@ -359,6 +359,8 @@ def create_app(settings: Settings, secrets: dict[str, Any], start_jobs: bool = T
             "tomorrow": describe_windows(tomorrow) if tomorrow is not None else None,
             "hours": settings.hot_water.hours_per_day,
             "boost_below": settings.hot_water.boost_below_pct,
+            "boost_wait": settings.hot_water.boost_wait_min,
+            "water_temp": settings.hot_water.water_temp,
         }
 
     def control_context(request: Request, error: str | None = None) -> dict:

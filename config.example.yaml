@@ -126,6 +126,8 @@ hot_water:
   evening_by: "19:00"
   evening_hours: 1
   boost_below_pct: 30         # outside the windows: boost once below this much hot water
+  boost_wait_min: 60          # … but not when a cheap window starts within this many minutes
+  water_temp: 70              # fixed target while Smart (the boiler's own "Automatic" may lower it); null: leave it
 
 # Price spikes: pause these zones during the day's most expensive hours (override from the app or the notification)
 spike:
