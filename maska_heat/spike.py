@@ -120,7 +120,7 @@ def overridden(db: Database, spike: Spike) -> bool:
 def set_override(db: Database, start: int, on: bool) -> None:
     starts = set(json.loads(db.get_kv(OVERRIDES_KEY) or "[]"))
     starts = (starts | {start}) if on else (starts - {start})
-    cutoff = _time.time() - 3 * 86400
+    cutoff = min(_time.time(), start) - 3 * 86400  # forget old ones — counted from the spike, not only the clock
     db.set_kv(OVERRIDES_KEY, json.dumps(sorted(s for s in starts if s > cutoff)))
 
 
